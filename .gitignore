@@ -23,3 +23,4 @@ __pycache__/
 # Separate projects with their own history (PoreSAM source, Meta SAM 2): fetch them, do not vendor them here
 /source/
 /vendor/
+/.claude/

@@ -106,6 +106,7 @@ function labSampleSet(value,remember=true){
   if(remember)try{localStorage.setItem('labimage.sample',value)}catch{/* storage may be blocked */}
   $('labSample').querySelectorAll('input').forEach(r=>{r.checked=r.value===value});
   $('labSampleHint').textContent=value==='particles'?'Confirming the calibration starts detection.':'Opens an empty workspace for the Tube tool.';
+  if(window.labRailReady)labRailSample(); // defined further down; this also runs during start-up
   if(!window.activeStopOperation)$('runAnalysis').textContent=labRunText();
   if(labMode==='report')document.querySelector('.steps [data-panel=editor] .sl-long').textContent=value==='particles'?'Measure particles':'Segment and measure';
 }
@@ -119,6 +120,7 @@ $('runAnalysis').onclick=async()=>{
   const before=state?state.dataset+':'+state.revision:null;
   await labRun();
   // Particles: a new, empty report workspace gets Detect particles right away.
+  if(labMode==='report'&&labSample==='particles')for(let i=0;i<50&&(busy||!state||$('editorPanel').classList.contains('hidden'));i++)await new Promise(r=>setTimeout(r,100)); // the workspace may still be opening
   if(labMode==='report'&&labSample==='particles'&&state&&!busy&&!state.candidates.length&&state.dataset+':'+state.revision!==before&&!$('editorPanel').classList.contains('hidden')){particleEnter('select');await particleDetect()}
 };
 const labShowProject=showProject;
@@ -131,8 +133,13 @@ showProject=async function(project){
   }
   $('labCalibrated').checked=project.config.calibrated===true;
   labCalibrationVisibility();
+  const meta=project.scale_metadata;
+  if(meta&&project.config.calibrated!==true){ // an earlier run without calibration must not hide the file's own scale
+    const px=meta.length_pixels||100;$('scalePixels').value=px;$('scaleUm').value=meta.label_um||+(px*meta.um_per_pixel).toFixed(4);
+    $('labCalibrated').checked=true;labCalibrationVisibility();
+  }
   if(project.scale_metadata&&$('scaleUm').value&&$('scalePixels').value){ // scale read from the microscope file: filled in and confirmed, still editable
-    $('scaleConfirmed').checked=true;updateCalibration();
+    $('scaleConfirmed').checked=true;updateCalibration();jobMessage('Scale read from the image file. Ready.');
     $('imageDetails').textContent+=` Scale read from the image file: ${project.scale_metadata.um_per_pixel.toFixed(4)} µm/px.`;
   }
   $('runAnalysis').textContent=labRunText();
@@ -313,6 +320,7 @@ $('regionSettings').classList.add('lab-label-only');
 const labModeLayout=labSetMode;
 labSetMode=function(value){
   labModeLayout(value);
+  if(window.labRailReady)labRailSample(); // defined further down; this also runs during start-up
   const steps=value==='report'?[['Load image','Load'],['Set scale','Scale'],[labSample==='particles'?'Measure particles':'Segment and measure','Measure'],['Build report','Report']]:[['Load image','Load'],['Set up','Setup'],['Label and refine','Label'],['Build report','Report']];
   document.querySelectorAll('.steps [data-panel]').forEach((b,i)=>{b.querySelector('.sl-long').textContent=steps[i][0];b.querySelector('.sl-short').textContent=steps[i][1]});
   document.querySelector('#setupPanel .workspace-intro h2').textContent=value==='report'?'Image and scale':'Labeling setup';
@@ -818,7 +826,7 @@ function tubeRender(data){
   const footCell=v=>v instanceof Element?v:el('td','',v);
   const count=key=>rows.filter(r=>r[key]!=null).length;
   const nl=count('length_um'),nw=count('width_um');
-  const foot=el('tr');foot.append(el('td','',`Mean ± SD (n = ${nl===nw||!nw?nl:!nl?nw:nl+' T, '+nw+' D'})`),footCell(mean('length_um')),footCell(mean('width_um')),el('td'));
+  const foot=el('tr');foot.append(el('td','',`Mean ± SD (n = ${nl===nw||!nw?nl:!nl?nw:nl+(rows.some(r=>r.particle)?' L, ':' T, ')+nw+(rows.some(r=>r.particle)?' W':' D')})`),footCell(mean('length_um')),footCell(mean('width_um')),el('td'));
   $('tubeFoot').replaceChildren(...(rows.length>1?[foot]:[]));
   tubeSyncSelection();
 }
@@ -897,6 +905,7 @@ function particleUpdate(){
 function particleCancel(){particle.trace=[];particle.cursor=null;particleUpdate()}
 function particleStageSet(stage){
   particleStage=stage;lineSel=null;
+  window.labFillScale=stage==='lines'?.3:1; // Edit lines: the particle surface stays visible under the lines
   particleCancel(); // labStrip refits the panes when the stage changes
 }
 function particleEditSet(value){
@@ -920,6 +929,22 @@ function particleEnter(stage=particleStage){
   window.updateToolLayout?.();particleStageSet(stage);
 }
 particleTool.onclick=()=>{if(!busy)particleEnter()};
+// Particles sample: the rail keeps Select, Particle, Delete, Undo and Clear. Select and Delete work inside the particle stages
+// instead of opening the generic segmentation view (where a line or a label cannot be clicked).
+const particleFlow=()=>labMode==='report'&&labSample==='particles';
+function labRailSample(){
+  for(const b of tools.querySelectorAll('[data-mode]'))if(!['select','particle','delete'].includes(b.dataset.mode))b.hidden=particleFlow();
+  window.labFillScale=particleFlow()&&mode==='particle'&&particleStage==='lines'?.3:1;
+}
+tools.addEventListener('click',event=>{
+  const b=event.target.closest?.('[data-mode]');
+  if(!b||!particleFlow()||busy||!state||!['select','delete'].includes(b.dataset.mode))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(mode!=='particle')particleEnter();
+  if(b.dataset.mode==='select'){if(particleStage==='lines')particleEditSet('select');return}
+  if((window.getSelectedPores?.()||[]).length)particleDeleteSelected();
+  else{if(particleStage==='lines')particleEditSet('select');setStatus(particleStage==='lines'?'Click a line, its label or a particle, then press Delete.':'Click a particle (Shift-click for more), then press Delete.')}
+},true);
 document.querySelectorAll('[data-mode]').forEach(b=>{if(b!==particleTool)b.addEventListener('click',()=>{lineSel=null;if(particle.trace.length)particleCancel()})});
 // Hook for the next stage: a separate Edit-lines module (window.particleEdit.open) takes over when present; else the built-in Edit lines below.
 $('particleNext').onclick=()=>{if(busy||!state)return;if(particleStage!=='select')return document.querySelector('.steps [data-panel=analysis]').click();if(window.particleEdit?.open)window.particleEdit.open();else particleStageSet('lines')};
@@ -970,6 +995,7 @@ async function particleLine(points){
 // Edit lines, Select: the nearest drawn line within 6 screen px, else the particle under the click (object selection), else nothing.
 function particleLineAt(point){
   const k=particleK();let best=null;
+  for(const b of particleLabels)if(point[0]>=b.x0&&point[0]<=b.x1&&point[1]>=b.y0&&point[1]<=b.y1)return {id:b.id,axis:b.axis,d:0}; // its value label counts as the line
   for(const r of particleRows())for(const axis of ['length','width']){
     const l=r[axis+'_line'];if(!particleLineOk(l))continue;
     const [a,b]=l,dx=b[0]-a[0],dy=b[1]-a[1],t=Math.max(0,Math.min(1,((point[0]-a[0])*dx+(point[1]-a[1])*dy)/(dx*dx+dy*dy||1)));
@@ -1036,13 +1062,28 @@ renderMeasurements=function(data){particleRender(data);particleSelUpdate();draw(
 new MutationObserver(()=>particleSelUpdate()).observe($('selectedPoreCount'),{childList:true,characterData:true,subtree:true}); // a table row click selects too
 // Edit lines: every length and width line, two colours on a dark halo; length has bar ends, width round ends (colour is not the only cue).
 // The selected line is thicker with white end handles. The live line uses the chosen axis colour, with small end dots, no numbers. Sized in screen pixels.
-function particleStroke(c,[a,b],axis,k,selected){
-  const color=particleColor(axis),w=(selected?3.5:2)*k,n=Math.hypot(b[0]-a[0],b[1]-a[1])||1,px=-(b[1]-a[1])/n*5*k,py=(b[0]-a[0])/n*5*k;
-  const path=()=>{c.beginPath();c.moveTo(...a);c.lineTo(...b);if(axis==='length')for(const p of [a,b]){c.moveTo(p[0]-px,p[1]-py);c.lineTo(p[0]+px,p[1]+py)}};
+// End lines come from the server (`<axis>_caps`): parallel, equally long, and for a Feret width long enough to touch the particle.
+let particleLabels=[]; // [{id, axis, x0, y0, x1, y1}] image px, refilled on every draw: a click on a label selects its line
+function particleStroke(c,[a,b],axis,k,selected,caps,value,id){
+  const color=particleColor(axis),w=(selected?3.5:2)*k,n=Math.hypot(b[0]-a[0],b[1]-a[1])||1,nx=-(b[1]-a[1])/n,ny=(b[0]-a[0])/n;
+  const ends=Array.isArray(caps)&&caps.length===2?caps:[a,b].map(p=>[[p[0]-nx*5*k,p[1]-ny*5*k],[p[0]+nx*5*k,p[1]+ny*5*k]]);
+  const path=()=>{c.beginPath();c.moveTo(...a);c.lineTo(...b);for(const [p,q] of ends){c.moveTo(...p);c.lineTo(...q)}};
   path();c.lineWidth=w+2.5*k;c.strokeStyle='rgba(6,8,12,.85)';c.stroke();
   path();c.lineWidth=w;c.strokeStyle=color;c.stroke();
-  if(axis==='width')for(const p of [a,b]){c.beginPath();c.arc(p[0],p[1],3*k,0,Math.PI*2);c.fillStyle=color;c.fill();c.lineWidth=1.2*k;c.strokeStyle='rgba(6,8,12,.85)';c.stroke()}
   if(selected)for(const p of [a,b]){c.beginPath();c.arc(p[0],p[1],4.5*k,0,Math.PI*2);c.fillStyle='#fff';c.fill();c.lineWidth=1.5*k;c.strokeStyle='rgba(6,8,12,.9)';c.stroke()}
+  if(value==null)return;
+  // Value beside the line (L / W says which, so colour is not the only cue), on the side away from the image centre of the line pair.
+  const text=(axis==='length'?'L ':'W ')+value.toFixed(2),size=12*k;
+  c.font=`600 ${size}px "Segoe UI",system-ui,sans-serif`;c.textBaseline='middle';c.textAlign='center';
+  // Beyond the line's end, outside the particle: the end nearer the image border loses, so labels stay on screen.
+  const tw=c.measureText(text).width,th=size*1.35,ux=(b[0]-a[0])/n,uy=(b[1]-a[1])/n,reach=7*k+Math.abs(ux)*(tw/2+4*k)+Math.abs(uy)*th/2;
+  const room=p=>Math.min(p[0],p[1],canvas.width-p[0],canvas.height-p[1]),atB=room(b)>=room(a),e=atB?b:a,sg=atB?1:-1;
+  let cx=e[0]+sg*ux*reach,cy=e[1]+sg*uy*reach;
+  cx=Math.max(tw/2+2*k,Math.min(canvas.width-tw/2-2*k,cx));cy=Math.max(th/2+2*k,Math.min(canvas.height-th/2-2*k,cy));
+  const box={id,axis,x0:cx-tw/2-4*k,y0:cy-th/2,x1:cx+tw/2+4*k,y1:cy+th/2};particleLabels.push(box);
+  c.fillStyle=selected?'#fff':'rgba(6,8,12,.78)';c.fillRect(box.x0,box.y0,box.x1-box.x0,box.y1-box.y0);
+  c.lineWidth=1*k;c.strokeStyle=color;c.strokeRect(box.x0,box.y0,box.x1-box.x0,box.y1-box.y0);
+  c.fillStyle=selected?'#111':color;c.fillText(text,cx,cy+.5*k);
 }
 const particleDrawBase=window.drawManualMeasurement;
 window.drawManualMeasurement=c=>{
@@ -1050,8 +1091,9 @@ window.drawManualMeasurement=c=>{
   if(!particleActive())return;
   const k=particleK();
   c.save();c.lineCap='round';c.setLineDash([]);
+  particleLabels=[];
   if(particleStage==='lines')for(const r of particleRows())for(const axis of ['length','width']){
-    const l=r[axis+'_line'];if(particleLineOk(l))particleStroke(c,l,axis,k,lineSel?.id===r.candidate_id&&lineSel.axis===axis);
+    const l=r[axis+'_line'];if(particleLineOk(l))particleStroke(c,l,axis,k,lineSel?.id===r.candidate_id&&lineSel.axis===axis,r[axis+'_caps'],r[axis+'_um'],r.candidate_id);
   }
   const pts=gesture?.moved&&gesture.button===0?gesture.points:particle.sent||(particle.trace.length&&particle.cursor?[particle.trace[0],particle.cursor]:particle.trace);
   if(pts.length){
@@ -1061,5 +1103,5 @@ window.drawManualMeasurement=c=>{
   }
   c.restore();
 };
-labRailRender(null);
+labRailRender(null);window.labRailReady=true;labRailSample();
 tubeKindSet(tubeKind,false);tubeLineSet(tubeLine,false);particleEditSet('select');particleAxisSet('length');

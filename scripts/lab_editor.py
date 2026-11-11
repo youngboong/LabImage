@@ -32,7 +32,8 @@ def particle_annotation(measure, source, features=None, warning=None):
     return dict(source=f'particle_{source}', supplemental=True, review_status='user_accepted', manual_measurements=present,
         measurement_methods={k: 'manual_line' if source == 'manual' else 'auto_feret' if k == 'length' else 'auto_feret_perpendicular' for k in present},
         particle=dict(length_line=lines['length'], width_line=lines['width'], length_px=measure.get('length_px'), width_px=measure.get('width_px'),
-                      width_caliper_px=measure.get('width_caliper_px'), width_chord_px=measure.get('width_chord_px'), source=source, features=features or {}, warning=warning))
+                      width_caliper_px=measure.get('width_caliper_px'), width_chord_px=measure.get('width_chord_px'), width_touch=measure.get('width_touch'),
+                      source=source, features=features or {}, warning=warning))
 
 
 def segments_cross(a, b, c, d):
@@ -446,7 +447,8 @@ class LabEditor(Editor):
         elif source: folder = source.parent
         else: return dict(need_folder=True)
         if not folder.is_absolute() or not folder.is_dir(): raise ValueError('Choose an existing folder.')
-        stem, suffix = (source.stem, source.suffix) if source else (Path(state['report'].get('source_name', 'image')).stem, '.png')
+        name = Path(state['report'].get('source_name', 'image'))   # original file name: only (2) / (3) is added, the extension stays
+        stem, suffix = (source.stem, source.suffix) if source else (name.stem, name.suffix if name.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg') else '.png')
         targets = [folder/f'{stem}(2){suffix}', folder/f'{stem}(3){suffix}']
         tables = [folder/f'{stem}(2).csv', folder/f'{stem}(3).csv']   # T# lengths / D# widths, as on the figures
         existing = [t.name for t in targets+tables if t.exists()]

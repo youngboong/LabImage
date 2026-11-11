@@ -47,6 +47,7 @@ def feret_measure(mask):
     s = ((h[lo]+h[hi])/2)@d   # along the length: midway between the two extreme outline points
     line = (d*s+n*p[lo], d*s+n*p[hi])
     return dict(length_px=float(dd[i, j]), length_line=[a.tolist(), b.tolist()], width_px=caliper, width_line=[line[0].tolist(), line[1].tolist()],
+                width_touch=[h[lo].tolist(), h[hi].tolist()],   # where the two width tangents touch the outline
                 width_caliper_px=caliper, width_chord_px=chord_px or caliper, solidity=float(mask.sum()/max(cv2.contourArea(h.astype(np.float32)), 1)))
 
 

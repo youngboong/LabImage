@@ -72,7 +72,8 @@ class LabWorkflow(ProjectWorkflow):
                 nice = min((m*10.**e for e in range(-3, 5) for m in (1, 2, 5)), key=lambda v: abs(v-label))
                 if abs(nice-label) <= .02*label: label, pixels = nice, nice/header['um_per_pixel']   # the bar's printed value (e.g. 200 µm); pixels follow the file's exact pixel size
                 project['config'].update(scale_pixels=round(pixels, 2), scale_um=round(label, 4), calibrated=True)
-                project['scale_metadata'] = dict(um_per_pixel=header['um_per_pixel'], source='TIFF header (TESCAN PixelSizeX)')
+                project['scale_metadata'] = dict(um_per_pixel=header['um_per_pixel'], source='TIFF header (TESCAN PixelSizeX)',
+                    label_um=project['config']['scale_um'], length_pixels=project['config']['scale_pixels'])   # kept apart from config: a later run cannot lose it
             self.persist(project)
         result = super().inspect(project_id)
         if (self.root/project_id/'input/display.png').exists():

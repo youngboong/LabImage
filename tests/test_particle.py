@@ -226,7 +226,7 @@ def test_overlay_labels_are_value_only_and_clear(lab):
     for m in state['masks'].values(): union |= m
     lines = np.zeros(SHAPE, bool)
     for a in state['annotations'].values():
-        for axis in ('length_line', 'width_line'): lines |= raster_segments(particle_segments(a['particle'][axis]), SHAPE)
+        for axis in ('length_line', 'width_line'): lines |= raster_segments(particle_segments(a['particle'][axis], touch=a['particle']['width_touch'] if axis == 'width_line' else None), SHAPE)
     for _, (x0, y0, x1, y1) in boxes:
         assert 0 <= x0 and 0 <= y0 and x1 <= figure.width and y1 <= figure.height
         assert not union[y0:y1, x0:x1].any() and not lines[y0:y1, x0:x1].any()
@@ -296,3 +296,19 @@ def test_particle_report_content_has_length_and_width_tables(lab):
     options = composer.defaults(data)
     options['items'] = [dict(id='figure_a', selected=True, caption='L', image_ids=['particle_length'], rows=[['particle_length']], columns=1), dict(id='particle_table', selected=True, caption='T')]
     assert '<table' in composer.render_html(data, composer.validate(options, data))
+
+
+def test_width_end_lines_touch_the_particle_and_match():
+    from lab_geometry import particle_segments
+    mask = np.zeros((200, 300), bool)
+    cv2.fillPoly(mask.view(np.uint8), [np.array([[40, 100], [150, 60], [260, 110], [120, 150]], np.int32)], 1)   # widest points at different places along the length
+    f = feret_measure(mask)
+    line, first, second = particle_segments(f['width_line'], touch=f['width_touch'])
+    lengths = [float(np.linalg.norm(q-p)) for p, q in (first, second)]
+    assert abs(lengths[0]-lengths[1]) < 1e-6 and lengths[0] > 9   # equal and long enough to reach
+    direction = lambda p, q: (q-p)/np.linalg.norm(q-p)
+    assert abs(abs(direction(*first)@direction(*second))-1) < 1e-9   # parallel
+    for (p, q), t in zip((first, second), np.asarray(f['width_touch'])):
+        d = direction(p, q); foot = p+((t-p)@d)*d
+        assert np.linalg.norm(t-foot) < 1.5 and -1e-6 <= (t-p)@d <= np.linalg.norm(q-p)+1e-6   # the touch point lies on the end line
+    assert len(particle_segments(f['width_line'], touch=[[0, 0], [5, 5]])) == 3   # foreign touch points are ignored

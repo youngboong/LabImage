@@ -629,3 +629,6 @@ body.report-panel-dragging .report-new-row{display:block}
 
 /* Reserve scrollbar space so expanding settings cannot shift the page. */
 html{scrollbar-gutter:stable}
+
+/* Particle flow: the results table may use the free height of the inspector */
+body[data-tool="particle"] .results-wrap{max-height:min(60vh,640px)}

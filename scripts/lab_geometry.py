@@ -269,11 +269,18 @@ def tube_edge_segments(edges):
     return [(a0, a1), (b0, b1)] + dots + [(mid-along*arm, mid+along*arm), (mid-u*arm, mid+u*arm)]
 
 
-def particle_segments(line, cap=9.):
-    """Particle style: the straight line plus a short perpendicular cap centred on each end."""
+def particle_segments(line, cap=9., touch=None):
+    """Particle style: the straight line plus a perpendicular cap centred on each end. The two caps are parallel and equally long.
+    `touch` = the outline points the tangents of a Feret width rest on: the caps then reach them, so each end line touches the particle."""
     a, b = np.asarray(line[0], float), np.asarray(line[-1], float)
-    across = np.array([-(b-a)[1], (b-a)[0]])/max(float(np.linalg.norm(b-a)), 1e-9)
-    return [(a, b)]+[(end-across*cap/2, end+across*cap/2) for end in (a, b)]
+    along = (b-a)/max(float(np.linalg.norm(b-a)), 1e-9)
+    across = np.array([-along[1], along[0]])
+    half = cap/2
+    if touch is not None and len(touch) == 2:
+        t = np.asarray(touch, float)
+        if abs((t[0]-a)@along) <= 1.5 and abs((t[1]-b)@along) <= 1.5:   # still this line's tangent points (a redrawn line has none)
+            half = max(half, abs((t[0]-a)@across)+1, abs((t[1]-b)@across)+1)
+    return [(a, b)]+[(end-across*half, end+across*half) for end in (a, b)]
 
 
 LABEL_PAD = 2                  # blank margin inside a label box, px
@@ -457,7 +464,7 @@ def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show
             path = np.asarray(line, dtype=float)
             if tube:
                 edges = state.get('annotations', {}).get(str(identifier), {}).get('width_edges')
-                segments = particle_segments(path) if particle else (tube_edge_segments(edges) if edges else tube_width_segments(path)) if is_width else list(zip(path[:-1], path[1:]))
+                segments = particle_segments(path, touch=state.get('annotations', {}).get(str(identifier), {}).get('particle', {}).get('width_touch') if is_width else None) if particle else (tube_edge_segments(edges) if edges else tube_width_segments(path)) if is_width else list(zip(path[:-1], path[1:]))
                 for p, q in segments: draw.line([tuple(p), tuple(q)], fill=TUBE_COLOR, width=1)
                 if segments and np.isfinite(value):
                     arc = np.r_[0., np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]

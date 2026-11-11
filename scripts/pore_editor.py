@@ -212,6 +212,12 @@ class Editor:
         table['particle_source']=table['candidate_id'].map(lambda i:state['annotations'].get(str(i),{}).get('particle',{}).get('source'))  # auto | click | manual
         for key in ('length_line', 'width_line', 'warning'):   # particle lines (image px) for the UI to draw and hit-test; the exclusion rule that fired at detection/click time
             table['particle_'+key if key == 'warning' else key]=table['candidate_id'].map(lambda i:state['annotations'].get(str(i),{}).get('particle',{}).get(key))
+        def caps(i, axis):   # the two end lines of a particle line, as the saved figure draws them
+            p = state['annotations'].get(str(i),{}).get('particle',{}); line = p.get(axis+'_line')
+            if not line: return None
+            from lab_geometry import particle_segments
+            return [[q.tolist() for q in s] for s in particle_segments(line, touch=p.get('width_touch') if axis == 'width' else None)[1:]]
+        for axis in ('length', 'width'): table[axis+'_caps']=table['candidate_id'].map(lambda i:caps(i, axis))
         cached = dict(dataset=state['dataset'], revision=state['revision'], stats=stats,
                       candidates=table.astype(object).where(table.notna(),None).to_dict(orient='records'))
         state['measurements'] = cached

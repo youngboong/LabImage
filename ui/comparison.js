@@ -119,7 +119,7 @@
   window.drawPoreLayer=context=>{
     if(!$('showOverlay').checked)return;
     if(!fill){if(outlines)context.drawImage(outlines,0,0);return;}
-    context.save();context.globalAlpha=Number($('poreOpacity').value)/100;context.drawImage(tintedFill,0,0);context.drawImage(tintedSupplemental,0,0);
+    context.save();context.globalAlpha=Number($('poreOpacity').value)/100*(window.labFillScale??1);context.drawImage(tintedFill,0,0);context.drawImage(tintedSupplemental,0,0);
     context.globalAlpha=1;context.drawImage(tintedEdges,0,0);
     if(numbers&&$('showPoreLabels').checked)context.drawImage(numbers,0,0);
     context.restore();
