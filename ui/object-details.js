@@ -2,21 +2,24 @@
   const dialog=$('poreDetailsDialog'),plot=$('detailsPlot'),ctx=plot.getContext('2d');
   const metrics=window.poreColumnCatalog.filter(item=>!item[3]),labels=Object.fromEntries(metrics.map(([key,label])=>[key,label]));
   const tableColumns=window.createPoreColumnPicker(()=>{sortKey='candidate_id';sortAscending=true;renderTable()});
-  // Particle rows (Report, Particles): a fixed table of length, width and source; mask-derived columns do not apply to them.
+  // Particle rows (Report, Particles): every Details item stays available (as in PoreSAM); Length and Width are the Feret lines and Source is added.
   const particleColumns=[['candidate_id','ID','Particle number on the figure.','id'],['length_um','Length (µm)','Longest Feret diameter, or the length line you drew.'],['width_um','Width (µm)','Feret diameter perpendicular to the length, or the width line you drew.'],['particle_source','Source','Auto: Detect particles. Click: added with one click. Manual line: drawn by hand.','text']];
   const particleSource={auto:'Auto',click:'Click',manual:'Manual line'},sourceText=row=>{const v=row.particle_source??row.particle?.source;return v==null?'':particleSource[v]??String(v)};
   let particleView=false;
-  const columns=()=>particleView?particleColumns.map(([key,label,help,type])=>[key,window.labUnitText(label),help,type]):tableColumns();
+  const particleHelp=Object.fromEntries(particleColumns.map(([key,,help])=>[key,help]));
+  const columns=()=>particleView?[...tableColumns().map(([key,label,help,type])=>[key,label,particleHelp[key]??help,type]),particleColumns[3]]:tableColumns();
+  // A particle drawn only as lines has no outline: its mask-derived items are blank, not numbers from the line itself.
+  const lineOnly=(row,key)=>row.particle_source==='manual'&&!['candidate_id','length_um','width_um','aspect_ratio'].includes(key);
   const definitions=document.querySelector('.details-definitions p'),objectDefinitions=definitions?.textContent;
   window.detailsColumns=columns;
   window.detailsTitle=()=>particleView?'Particle Details':'Object details';
   function setKind(next){
     if(next===particleView&&$('detailsXAxis').options.length)return;
     particleView=next;sortKey='candidate_id';sortAscending=true;
-    for(const select of [$('detailsXAxis'),$('detailsYAxis')]){select.replaceChildren();(next?particleColumns.filter(c=>!c[3]):metrics).forEach(([key,label])=>select.add(new Option(label,key)))}
+    for(const select of [$('detailsXAxis'),$('detailsYAxis')]){select.replaceChildren();metrics.forEach(([key,label])=>select.add(new Option(label,key)))}
     $('detailsXAxis').value=next?'length_um':'equivalent_diameter_um';$('detailsYAxis').value=next?'width_um':'roundness';
-    $('openDetailsColumns').hidden=next;document.title=window.detailsTitle();
-    if(definitions)definitions.textContent=next?'Length = longest Feret diameter of the particle outline, or the length line you drew. Width = Feret diameter perpendicular to the length, or the width line you drew. A particle may have only one of them; the other shows —. Source: Auto = Detect particles, Click = added with one click, Manual line = drawn by hand.':objectDefinitions;
+    document.title=window.detailsTitle();
+    if(definitions)definitions.textContent=next?'Length = longest Feret diameter, Width = Feret diameter perpendicular to it (or the lines you drew). Other items come from the particle outline; they are blank for particles drawn only as lines. '+(objectDefinitions??''):objectDefinitions;
   }
   const format=value=>value==null||!Number.isFinite(value)?'—':value.toLocaleString(undefined,{maximumFractionDigits:3,minimumFractionDigits:3});
   let data=null,selectedIds=new Set(),allSelected=true,view='table',points=[],bars=[],plotRows=[],lastPlot=null;
@@ -65,7 +68,7 @@
       row.classList.toggle('selected',highlight.has(candidate.candidate_id));row.setAttribute('aria-selected',String(highlight.has(candidate.candidate_id)));
       for(const [key,,help,type] of columns()){
         const cell=document.createElement('td');cell.title=help;
-        cell.textContent=type==='text'?(sourceText(candidate)||'—'):type==='id'?candidate.candidate_id+(candidate.touches_image_edge?' †':''):type==='boolean'?(candidate[key]==null?'—':candidate[key]?'Yes':'No'):format(candidate[key]);
+        cell.textContent=type==='text'?(sourceText(candidate)||'—'):type==='id'?candidate.candidate_id+(candidate.touches_image_edge?' †':''):lineOnly(candidate,key)?'—':type==='boolean'?(candidate[key]==null?'—':candidate[key]?'Yes':'No'):format(candidate[key]);
         row.append(cell);
       }
       row.onclick=event=>window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey);
@@ -97,7 +100,7 @@
   }
   function update(){
     const rows=selectedRows();$('detailsTargetCount').textContent='('+rows.length+'/'+(data?.candidates.length??0)+')';
-    $('detailsSummary').textContent=particleView?rows.length+(rows.length===1?' particle selected.':' particles selected.'):rows.length+' selected. Image area fraction (2D): '+format(data?.stats.candidate_union_area_percent)+'%';
+    $('detailsSummary').textContent=(particleView?rows.length+(rows.length===1?' particle':' particles'):rows.length)+' selected. Image area fraction (2D): '+format(data?.stats.candidate_union_area_percent)+'%';
     // The table filter controls measurements shown here, not the editor's
     // selection. Hidden rows must never deselect objects in the image.
     renderTable();if(view!=='table')drawPlot();
