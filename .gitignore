@@ -1,0 +1,25 @@
+# Lab data and anything derived from it: never published
+/CNT/
+/261110_704113_powder/
+/validation/
+/LabImage-data/
+/outputs/
+/backup_before_cnt/
+/graphify-out/
+# Build products, models, environments
+/build/
+/dist/
+/_internal/
+/LabImage.exe
+/checkpoints/
+/PoreSAM/
+/.venv/
+/.uv-cache/
+/.xpu-runtime/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.partial
+# Separate projects with their own history (PoreSAM source, Meta SAM 2): fetch them, do not vendor them here
+/source/
+/vendor/

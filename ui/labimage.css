@@ -1,0 +1,39 @@
+/* ui/labimage.css: mode rules (they only show or hide) and the home screen. Styling lives in theme.css and workspace.css. */
+body[data-lab-mode="labeling"] [data-panel="analysis"],body[data-lab-mode="labeling"] .lab-report-only{display:none!important}
+body[data-lab-mode="report"] .lab-label-only{display:none!important}
+body:not(.lab-advanced) [data-mode="ellipse"],body:not(.lab-advanced) [data-mode="cut"]{display:none!important}
+.automate-panel,#feedbackDialog{display:none!important}
+.tool-group:empty{display:none}
+
+/* ---- 4.11 home ---- */
+#labHome{position:fixed;inset:0;z-index:var(--z-home);overflow:auto;background:var(--surface-app)}
+.lab-home-inner{max-width:960px;margin:0 auto;padding:18vh var(--sp-9) var(--sp-9)}
+.lab-home-inner>h1{font:var(--fw-semibold) var(--fs-32)/1.1 var(--font-display);letter-spacing:-.01em}
+.lab-home-lead{max-width:60ch;text-wrap:pretty;margin:var(--sp-4) 0 var(--sp-8);font-size:var(--fs-14);color:var(--text-2)}
+.lab-mode-cards{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-6)}
+.lab-mode-cards>button{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:var(--sp-4);min-height:220px;padding:var(--sp-8);
+  border:var(--border);border-radius:var(--r-4);background:var(--surface-raised);color:var(--text);text-align:left;white-space:normal;line-height:var(--lh)}
+.lab-mode-cards>button:hover:not(:disabled){background:var(--surface-raised);border-color:var(--accent)}
+.lab-mode-cards>button:active:not(:disabled){background:var(--surface-pressed)}
+.lab-mode-cards .home-art{width:132px;height:72px;margin-bottom:var(--sp-3);fill:none;stroke-linecap:round;stroke-linejoin:round}
+/* miniature of each workspace's output on the image well: the only place chrome shows data colors */
+.lab-mode-cards .home-art :is(.well,text){stroke:none} /* button svg sets a stroke for icons */
+.home-art .well{fill:var(--well)}
+.home-art .obj{fill:rgba(255,215,0,.28);stroke:#ffd700;stroke-width:1.5} /* default object overlay color, a data color */
+.home-art .id{fill:#fff;font:600 8px var(--font-mono)}
+.home-art .fiber{stroke:#9a9a9a;stroke-width:6}
+.home-art .fiber.thin{stroke:#7a7a7a;stroke-width:4}
+.home-art .m{stroke:var(--measure);stroke-width:1.75}
+.home-art .end{fill:var(--measure);stroke:var(--measure-ink);stroke-width:1}
+.home-art .chipbox{fill:var(--measure);stroke:var(--measure-edge);stroke-width:1}
+.home-art text{fill:var(--measure-ink);font:600 8px var(--font-mono)}
+.lab-mode-cards strong{font:var(--fw-semibold) var(--fs-20)/1.2 var(--font-display)}
+.lab-mode-cards span{color:var(--text-2);max-width:42ch}
+.lab-mode-cards small{font-size:var(--fs-12);color:var(--text-3)}
+.lab-mode-cards b{margin-top:auto;padding-top:var(--sp-4);color:var(--accent);font-weight:var(--fw-semibold)}
+.lab-home-foot{margin-top:var(--sp-6);font-size:var(--fs-12);color:var(--text-3)}
+@media (max-width:759px){
+  .lab-mode-cards{grid-template-columns:1fr}
+  .lab-home-inner{padding:var(--sp-9) var(--sp-6)}
+  .lab-mode-cards>button{min-height:0}
+}

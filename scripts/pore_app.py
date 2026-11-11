@@ -1,0 +1,191 @@
+"""LabImage desktop entry point (Windows / WebView2)."""
+import argparse
+import ctypes
+import hashlib
+import json
+import logging
+from logging.handlers import RotatingFileHandler
+import multiprocessing
+import os
+from pathlib import Path
+import sys
+import threading
+import traceback
+
+
+def default_data_dir():
+    return (Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1])/'LabImage-data/outputs'
+
+
+def acquire_instance(directory):
+    if os.name!='nt':return None
+    api=ctypes.WinDLL('kernel32',use_last_error=True)
+    api.CreateMutexW.argtypes=[ctypes.c_void_p,ctypes.c_bool,ctypes.c_wchar_p]
+    api.CreateMutexW.restype=ctypes.c_void_p
+    name='Local\\LabImage_'+hashlib.sha256(str(directory).lower().encode()).hexdigest()[:24]
+    handle=api.CreateMutexW(None,False,name)
+    if not handle:raise ctypes.WinError(ctypes.get_last_error())
+    if ctypes.get_last_error()==183:
+        api.CloseHandle.argtypes=[ctypes.c_void_p];api.CloseHandle(handle)
+        return False
+    return handle
+
+
+def acquire_workspace(base):
+    """Reserve an independent persistent workspace for each concurrently open app."""
+    number=1
+    while True:
+        directory=base if number==1 else base.parent/(base.name+'_workspaces')/f'workspace_{number:04d}'/'outputs'
+        handle=acquire_instance(directory)
+        if handle is not False:return directory,handle,number
+        number+=1
+
+
+def startup_error_message(error,log_path):
+    message='LabImage could not start.\n\n'+type(error).__name__+': '+str(error)
+    if 'Python.Runtime.Loader.Initialize' in str(error):
+        message+='\n\nWindows may have blocked a downloaded DLL. Check the downloaded ZIP file Properties, choose Unblock if available, and extract it into a new local folder.'
+    return message+'\n\nDetails: '+str(log_path)
+
+
+def main():
+    parser=argparse.ArgumentParser(description='LabImage for Windows')
+    parser.add_argument('--device',choices=['cpu','auto','cuda','intel-gpu'],default='auto')
+    parser.add_argument('--data-dir',type=Path,default=default_data_dir())
+    parser.add_argument('--checkpoint',type=Path)
+    parser.add_argument('--debug',action='store_true')
+    parser.add_argument('--smoke-test',type=Path,help=argparse.SUPPRESS)
+    parser.add_argument('--self-test',type=Path,help=argparse.SUPPRESS)
+    args=parser.parse_args()
+    if args.self_test:
+        from lab_selftest import run
+        run(args.self_test, device=args.device)
+        return 0
+    directory,mutex,workspace_number=acquire_workspace(args.data_dir.expanduser().resolve())
+    directory.mkdir(parents=True,exist_ok=True)
+    os.environ['LABIMAGE_DATA_DIR']=str(directory)
+    os.environ.setdefault('MPLCONFIGDIR',str(directory/'.matplotlib'))
+    if args.checkpoint:os.environ['LABIMAGE_CHECKPOINT']=str(args.checkpoint.resolve())
+    logs=directory.parent/'logs';logs.mkdir(parents=True,exist_ok=True)
+    logging.basicConfig(level=logging.INFO,handlers=[RotatingFileHandler(logs/'desktop.log',maxBytes=2_000_000,backupCount=3,encoding='utf-8')])
+    # PyInstaller's windowed build has no console streams.
+    if sys.stdout is None:sys.stdout=open(logs/'console.log','a',encoding='utf-8',buffering=1)
+    if sys.stderr is None:sys.stderr=sys.stdout
+    server=None;worker=None
+    try:
+        import webview
+        # CSV and plot exports use browser downloads; WebView2 opens Save As.
+        webview.settings['ALLOW_DOWNLOADS']=True
+        from pore_editor import LocalPoreServer
+        from lab_editor import LabEditor as Editor, make_handler
+        from app_paths import checkpoint_path
+        import torch
+        logging.info('Desktop runtime: torch=%s cuda=%s',torch.__version__,torch.version.cuda)
+        if not checkpoint_path().is_file():raise FileNotFoundError('SAM model missing: '+str(checkpoint_path()))
+        editor=Editor(device=args.device)
+        server=LocalPoreServer(('127.0.0.1',0),make_handler(editor))
+        worker=threading.Thread(target=server.serve_forever,name='LabImage server',daemon=True);worker.start()
+        title='LabImage' if workspace_number==1 else f'LabImage - Workspace {workspace_number}'
+        from desktop_details import DesktopDetails
+        details=DesktopDetails()
+        base_url=f'http://127.0.0.1:{server.server_port}'
+        window=webview.create_window(title,base_url,width=1440,height=960,min_size=(1024,720),text_select=True,background_color='#edf2f3',js_api=details)
+        details._main=window;details._url=base_url;details._title=title+' - Object Details'
+        window.events.closed+=details.close_details
+        from export_folder_picker import ExportFolderPicker
+        def picker(initial):
+            result=window.create_file_dialog(webview.FileDialog.FOLDER,directory=initial)
+            return result[0] if result else ''
+        editor.folder_picker=ExportFolderPicker(picker,directory/'export_folder_default.json')
+        editor.report_folder_picker=lambda: list(window.create_file_dialog(webview.FileDialog.FOLDER,allow_multiple=True) or [])
+        editor.image_picker=lambda: (window.create_file_dialog(webview.FileDialog.OPEN,file_types=('Images (*.tif;*.tiff;*.png;*.jpg;*.jpeg)',)) or [''])[0]
+        pdf_preview={'window':None}
+        def clear_pdf_preview():
+            pdf_preview['window']=None
+        def show_pdf_preview(url):
+            target=base_url+url+'#view=Fit'
+            existing=pdf_preview['window']
+            if existing:
+                existing.load_url(target);existing.show();existing.restore()
+            else:
+                preview=webview.create_window(title+' - PDF Preview',target,width=1100,height=900,min_size=(800,600),background_color='#525659')
+                pdf_preview['window']=preview
+                preview.events.closed+=clear_pdf_preview
+        def close_pdf_preview():
+            if pdf_preview['window']:pdf_preview['window'].destroy()
+        editor.show_pdf_preview=show_pdf_preview
+        window.events.closed+=close_pdf_preview
+
+        close_state={'approved':False,'checking':False}
+        def check_close():
+            # Run outside the native closing event: evaluate_js needs the UI thread.
+            try:
+                editing=window.evaluate_js("typeof busy!=='undefined' && busy")
+                if editor.workflow.running or editing:
+                    window.evaluate_js("setStatus('Wait for the current operation to finish before closing.',true)")
+                    return
+                draft=window.evaluate_js("typeof points!=='undefined' && Boolean(points.length||box||shape||polygon.length||cutPath.length||cutPaths.length||queuedRegions.some(r=>r.status!=='Added'))")
+                if draft and not window.create_confirmation_dialog('Close LabImage','Discard pending drawing and previews? Saved edits are kept.'):return
+            except Exception:logging.exception('Close check failed')
+            finally:close_state['checking']=False
+            close_state['approved']=True
+            details.close_details()
+            window.destroy()
+        def closing():
+            if args.smoke_test or close_state['approved']:return True
+            if not close_state['checking']:
+                close_state['checking']=True
+                threading.Thread(target=check_close,name='LabImage close check',daemon=True).start()
+            return False
+        window.events.closing+=closing
+        def smoke():
+            try:
+                import time
+                for _ in range(120):
+                    if window.evaluate_js("document.readyState==='complete' && typeof busy!=='undefined' && !busy && typeof labChoose==='function'"):break
+                    time.sleep(.25)
+                else:raise RuntimeError('Desktop UI did not become ready')
+                info=window.evaluate_js("({title:document.title,load:document.getElementById('newImageTab').getAttribute('aria-selected'),steps:document.querySelector('.steps').innerText})")
+                assert info['load']=='true',info
+                from lab_ui_smoke import run as run_ui_smoke
+                info['integration'] = run_ui_smoke(window)
+                info.update(device=editor.device,data_dir=str(directory),port=server.server_port,workspace=workspace_number)
+                args.smoke_test.parent.mkdir(parents=True,exist_ok=True)
+                args.smoke_test.write_text(json.dumps(info,indent=2),encoding='utf-8')
+            except Exception:
+                logging.exception('Desktop smoke test failed')
+                args.smoke_test.with_suffix('.error.txt').write_text(traceback.format_exc(),encoding='utf-8')
+            finally:window.destroy()
+        if args.smoke_test:window.events.loaded+=smoke
+        logging.info('Desktop started: data=%s device=%s port=%s',directory,editor.device,server.server_port)
+        webview.start(gui='edgechromium',debug=args.debug,private_mode=False,storage_path=str(directory.parent/'webview'))
+    except Exception as error:
+        logging.exception('Desktop startup failed')
+        if args.smoke_test:
+            args.smoke_test.parent.mkdir(parents=True,exist_ok=True);args.smoke_test.with_suffix('.error.txt').write_text(traceback.format_exc(),encoding='utf-8')
+        elif os.name=='nt':ctypes.windll.user32.MessageBoxW(None,startup_error_message(error,logs/'desktop.log'),'LabImage',0x10)
+        else:raise
+        return 1
+    finally:
+        from lab_gpu_worker import close_workers
+        close_workers()
+        if server:server.shutdown();server.server_close()
+        if worker:worker.join(timeout=5)
+        if mutex:
+            api=ctypes.WinDLL('kernel32',use_last_error=True);api.CloseHandle.argtypes=[ctypes.c_void_p];api.CloseHandle(mutex)
+        logging.info('Desktop stopped')
+    return 0
+
+
+if __name__=='__main__':
+    multiprocessing.freeze_support()
+    exit_code=main() or 0
+    if os.name=='nt':
+        # main() has closed the window/server and released the instance mutex.
+        # Python.NET CLR finalization hangs (or crashes if its unload is skipped)
+        # on this Windows stack. Flush our files, then let Windows reclaim it.
+        logging.shutdown()
+        for stream in (sys.stdout,sys.stderr):
+            if stream:stream.flush()
+        os._exit(exit_code)
+    raise SystemExit(exit_code)
