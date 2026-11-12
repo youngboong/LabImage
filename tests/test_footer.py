@@ -77,3 +77,21 @@ def test_source_path_is_remembered_on_a_fresh_install(tmp_path):
     editor = LabEditor(output_root=tmp_path/'not'/'there'/'yet', project_root=tmp_path/'projects', device='cpu')
     editor.remember_source('abc', tmp_path/'image.tif')   # used to fail: the edits folder does not exist before the first save
     assert editor.source_paths() == {'abc': str(tmp_path/'image.tif')}
+
+
+def test_replace_file_waits_out_a_short_windows_lock(tmp_path, monkeypatch):
+    from pathlib import Path
+    import pytest
+    from result_paths import replace_file
+    source, target = tmp_path/'a.pending', tmp_path/'a.json'
+    source.write_text('new'); target.write_text('old')
+    real, calls = Path.replace, []
+    def flaky(self, other):
+        calls.append(1)
+        if len(calls) < 3: raise PermissionError(13, 'Access is denied')   # WinError 5 while another program reads the file
+        return real(self, other)
+    monkeypatch.setattr(Path, 'replace', flaky)
+    replace_file(source, target)
+    assert target.read_text() == 'new' and len(calls) == 3
+    monkeypatch.setattr(Path, 'replace', lambda self, other: (_ for _ in ()).throw(PermissionError(13, 'locked')))
+    with pytest.raises(PermissionError): replace_file(tmp_path/'b', tmp_path/'c', tries=2)   # a real, lasting denial still surfaces

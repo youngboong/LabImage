@@ -18,7 +18,7 @@ import tifffile
 import torch
 
 from analyze_candidates import export_folder
-from result_paths import read_artifact, write_artifact
+from result_paths import read_artifact, replace_file, write_artifact
 from pore_preprocessing import preprocessing_config, prepare_image, adjustable_config
 from segment_first_pass import detect_footer, detect_scale_bar, overlay
 from sam2.build_sam import build_sam2
@@ -46,7 +46,7 @@ class ProjectWorkflow:
         folder = self.root / project['id']
         pending = folder / 'project.pending.json'
         pending.write_text(json.dumps(project, indent=2, ensure_ascii=False), encoding='utf-8')
-        pending.replace(folder / 'project.json')
+        replace_file(pending, folder / 'project.json')
 
     def datasets(self):
         with self.lock:

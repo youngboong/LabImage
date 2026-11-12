@@ -23,7 +23,7 @@ import torch
 
 from analyze_candidates import measure_masks, export_folder, current_report_exists
 from segment_first_pass import overlay
-from result_paths import read_artifact
+from result_paths import read_artifact, replace_file
 from project_workflow import ProjectWorkflow
 from pore_overlap import exclusive_existing,overlap_pixels
 from sam2.build_sam import build_sam2
@@ -451,7 +451,7 @@ class Editor:
         pending.write_text(json.dumps(dict(revision=revision)),encoding="utf-8")
         from contextlib import nullcontext
         with publish_guard() if publish_guard else nullcontext():
-            pending.replace(parent/"latest.json")
+            replace_file(pending, parent/"latest.json")
             state.update(masks=masks,annotations=annotations,history=history,next_id=next_id,revision=revision,preview=None)
         return self.response(state, include_measurements=False)
 
@@ -473,7 +473,7 @@ class Editor:
             export_folder(folder)
             pending = folder/'report_ready.pending.json'
             pending.write_text(json.dumps(dict(revision=state['revision'])),encoding='utf-8')
-            pending.replace(folder/'report_ready.json')
+            replace_file(pending, folder/'report_ready.json')
         result=self.response(state)
         if directory is not None:
             from report_bundle import export_bundle

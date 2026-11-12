@@ -8,6 +8,7 @@ from pathlib import Path
 from pore_editor import Editor, make_handler as original_handler, png_url
 from lab_workflow import LabWorkflow
 from lab_geometry import geometry, measured_overlay
+from result_paths import replace_file
 
 
 TUBE_KINDS = ('td', 't', 'd')   # length + width, length only, width only
@@ -457,7 +458,7 @@ class LabEditor(Editor):
             figure = self.label_figure(state, length, width, int(payload.get('font_size', 16)))
             partial = target.with_name('.'+target.name+'.partial')
             figure.save(partial, format={'.tif': 'TIFF', '.tiff': 'TIFF', '.jpg': 'JPEG', '.jpeg': 'JPEG'}.get(suffix.lower(), 'PNG'))
-            partial.replace(target)
+            replace_file(partial, target)
         import csv
         unit = state['report'].get('measurement_unit', 'µm')
         rows = [r for r in self.measurements(state)['candidates'] if r.get('tube') or r.get('particle')]
@@ -468,7 +469,7 @@ class LabEditor(Editor):
                 writer.writerow(['label', f'{name}_{unit}'])
                 for r in rows:
                     if r.get(key) is not None: writer.writerow([r['candidate_id'] if r.get('particle') else f"{prefix}{r['candidate_id']}", f"{r[key]:.2f}"])
-            partial.replace(table)
+            replace_file(partial, table)
         return dict(saved=[str(t) for t in targets+tables])
 
     def source_path(self, state):

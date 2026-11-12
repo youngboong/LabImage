@@ -22,3 +22,13 @@ def write_artifact(folder, name):
     path = Path(folder) / ARTIFACT_PATHS.get(name, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def replace_file(source, target, tries=20):
+    """Path.replace that waits out a short lock on Windows (antivirus or Explorer reading a file just written: WinError 5 / 32)."""
+    import time
+    for attempt in range(tries):
+        try: return Path(source).replace(target)
+        except PermissionError:
+            if attempt == tries-1: raise
+            time.sleep(.1)
