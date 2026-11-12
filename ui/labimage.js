@@ -298,6 +298,21 @@ $('labSavedOk').onclick=()=>labSavedDialog.close();
 // Batch: every image of a folder is calibrated from its file, detected and saved beside the original (name(2), name(3), CSVs).
 // Nothing is replaced: images that already have (2) or (3) are skipped. Each result can be reviewed later from Open analysis.
 $('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-report-only"><button id="labBatch" type="button" title="Detect particles in every image of a folder and save name(2), name(3) and CSV files beside each image. Images that already have (2) or (3) are skipped.">Process a folder…</button></div>');
+// Update: the latest GitHub release may carry a small patch; the app downloads it, closes, swaps the files and starts again.
+$('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-update"><button id="labUpdate" type="button">Check for updates</button><span id="labUpdateState" class="hint" role="status"></span></div>');
+$('labUpdate').onclick=async()=>{
+  const say=(text,bad)=>{$('labUpdateState').textContent=text;$('labUpdateState').classList.toggle('error',!!bad)};
+  $('labUpdate').disabled=true;say('Checking…');
+  try{
+    const found=await api('update-check',{});
+    if(!found.update){say(`LabImage ${found.current} is up to date.`);return}
+    if(!found.patch){say(`Version ${found.latest} needs a full install: ${found.page}`);return}
+    if(!confirm(`Update LabImage ${found.current} to ${found.latest}? (${Math.round(found.patch.size/1e6)} MB) LabImage closes and starts again.`)){say(`Version ${found.latest} is available.`);return}
+    say('Downloading. LabImage will restart…');
+    await api('update-install',{});
+  }catch(error){say(error.message,true)}
+  finally{$('labUpdate').disabled=false}
+};
 const labBatchDialog=document.createElement('dialog');labBatchDialog.id='labBatchDialog';labBatchDialog.setAttribute('aria-labelledby','labBatchTitle');
 labBatchDialog.innerHTML='<div class="dialog-head"><h2 id="labBatchTitle">Process a folder</h2></div><p id="labBatchFolder" class="saved-folder"></p><p id="labBatchState" class="hint" role="status"></p><progress id="labBatchBar" max="1" value="0" aria-label="Batch progress"></progress><div class="results-wrap"><table class="results"><caption class="sr-only">Batch results</caption><thead><tr><th scope="col">Image</th><th scope="col">Result</th></tr></thead><tbody id="labBatchRows"></tbody></table></div><div class="row"><button id="labBatchStop" type="button">Stop</button><button id="labBatchClose" class="primary" type="button">Close</button></div>';
 document.body.append(labBatchDialog);

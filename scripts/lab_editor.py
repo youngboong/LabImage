@@ -637,7 +637,7 @@ def make_handler(editor):
             return super().do_GET()
 
         def do_POST(self):
-            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop'):
+            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop','/api/update-check','/api/update-install'):
                 return super().do_POST()
             if not self.valid_host() or self.headers.get('X-Object-Editor') != '1':
                 return self.send(403, dict(error='Local access only'))
@@ -648,6 +648,17 @@ def make_handler(editor):
                 length = int(self.headers.get('Content-Length','0'))
                 if not 0 < length <= 1_000_000: raise ValueError('Invalid request size.')
                 payload = json.loads(self.rfile.read(length))
+                if self.path == '/api/update-check':
+                    import app_update
+                    return self.send(200, app_update.check())
+                if self.path == '/api/update-install':   # downloads the patch, then the app closes and a helper swaps the files
+                    import app_update, threading
+                    if editor.workflow.running or (getattr(editor, 'batch', None) and editor.batch['running']): raise ValueError('Wait for the current analysis.')
+                    quit_app = getattr(editor, 'quit_app', None)
+                    if not quit_app: raise ValueError('Updates work in the installed app.')
+                    result = app_update.install(editor.output_root.parent/'update')
+                    threading.Timer(1.5, quit_app).start()
+                    return self.send(200, result)
                 if self.path == '/api/batch-particles': return self.send(200, editor.batch_start(payload))
                 if self.path == '/api/batch-status': return self.send(200, editor.batch_status())
                 if self.path == '/api/batch-stop': return self.send(200, editor.batch_stop())

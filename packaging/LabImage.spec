@@ -22,7 +22,7 @@ import importlib.metadata
 ov_license = Path(importlib.metadata.distribution('openvino').locate_file('openvino-2025.4.0.dist-info/licenses'))
 datas += [(str(ov_license), 'licenses/OpenVINO')]
 gpu_binaries = collect_dynamic_libs('openvino')
-hidden=collect_submodules('sam2')+['lab_editor','lab_geometry','cnt_detect','particle_detect','lab_workflow','lab_export','lab_selftest','lab_ui_smoke','report_docx','report_hwpx','report_composer','report_workspace']+['automate_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
+hidden=collect_submodules('sam2')+['lab_editor','lab_geometry','cnt_detect','particle_detect','app_update','lab_workflow','lab_export','lab_selftest','lab_ui_smoke','report_docx','report_hwpx','report_composer','report_workspace']+['automate_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
 hidden += ['lab_openvino'] + collect_submodules('openvino.properties')
 a=Analysis([str(root/'scripts/pore_app.py')],pathex=[str(root/'scripts')],binaries=gpu_binaries,datas=datas,hiddenimports=hidden,
            hooksconfig={'matplotlib':{'backends':['Agg','pdf','svg']}},

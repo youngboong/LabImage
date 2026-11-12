@@ -103,3 +103,9 @@ TESCAN TIFF는 파일에 든 픽셀 크기로 스케일이 자동 입력됩니�
 Load image 화면의 **Process a folder…**로 폴더를 고르면 그 안의 모든 이미지에서 입자를 찾아
 `이름(2)`, `이름(3)` 그림과 CSV를 원본 옆에 저장합니다. 이미 (2)나 (3)이 있는 이미지는
 건너뜁니다. 결과는 **Open analysis**에서 열어 고친 뒤 다시 저장할 수 있습니다.
+
+## Updating
+
+On the Load image screen, **Check for updates** looks at the latest GitHub release. Most versions change only `LabImage.exe` and `_internal/ui`, so the release carries a small patch zip (about 50 MB): the app downloads it, closes, replaces those files and starts again. When the libraries or the model changed, it says a full install is needed instead.
+
+Releasing: set `VERSION` in `scripts/app_update.py` (and `BASE` to the same value when `_internal` changed), build, then publish the full zip and the patch `LabImage-v<version>-patch-from-v<BASE>.zip`.

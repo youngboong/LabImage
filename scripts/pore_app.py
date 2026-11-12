@@ -138,6 +138,11 @@ def main():
                 threading.Thread(target=check_close,name='LabImage close check',daemon=True).start()
             return False
         window.events.closing+=closing
+        def quit_app():   # after an update was downloaded: the helper script waits for this process to end
+            close_state['approved']=True
+            details.close_details()
+            window.destroy()
+        editor.quit_app=quit_app
         def smoke():
             try:
                 import time
@@ -157,6 +162,8 @@ def main():
                 args.smoke_test.with_suffix('.error.txt').write_text(traceback.format_exc(),encoding='utf-8')
             finally:window.destroy()
         if args.smoke_test:window.events.loaded+=smoke
+        import app_update
+        logging.info('LabImage %s',app_update.VERSION)
         logging.info('Desktop started: data=%s device=%s port=%s',directory,editor.device,server.server_port)
         webview.start(gui='edgechromium',debug=args.debug,private_mode=False,storage_path=str(directory.parent/'webview'))
     except Exception as error:
