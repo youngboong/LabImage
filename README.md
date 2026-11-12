@@ -7,9 +7,9 @@ Windows에서 실행하는 일반 객체 분할·측정 앱입니다. PoreSAM의
 
 이 폴더의 **LabImage.exe**를 실행하세요. 옆의 **_internal** 폴더도 함께
 있어야 합니다. Python을 따로 설치하지 않아도 됩니다. 작업 내용과 로그는
-`LabImage-data`에 저장됩니다. 여러 창을 열면 작업 공간이 분리됩니다.
+`LabImage-data`에 저장됩니다. 창을 여러 개 열면 창마다 작업 공간이 분리됩니다.
 
-모델은 Meta 공식 **SAM 2.1 Small 원본 사전학습 가중치**이며, 기공 또는
+모델은 Meta 공식 **SAM 2.1 Small 원본 사전학습 가중치**이며 기공 또는
 사용자 이미지로 추가 파인튜닝하지 않았습니다. CPU로 실행합니다.
 
 ## 라벨링
@@ -18,9 +18,9 @@ Windows에서 실행하는 일반 객체 분할·측정 앱입니다. PoreSAM의
 2. 분석 영역·최소 면적·샘플링을 설정하고 **자동 분석 시작**을 누릅니다.
    스케일 보정은 선택 사항입니다.
 3. 객체 내부에 점을 찍으면 SAM 결과가 바로 반영됩니다. 기존 객체 내부를
-   클릭하면 해당 객체를 수정합니다. 다른 객체의 픽셀은 보존합니다.
-4. **Shift+클릭**은 같은 객체에 양성 점을 추가합니다. **우클릭** 또는
-   **점 −**는 제외할 점입니다. **새 객체**로 프롬프트를 초기화합니다.
+   클릭하면 그 객체를 수정하며 다른 객체의 픽셀은 건드리지 않고 보존합니다.
+4. **Shift+클릭**은 같은 객체에 양성 점을 추가합니다. **우클릭**이나
+   **점 −**로는 제외할 점을 찍습니다. **새 객체**를 누르면 프롬프트가 초기화됩니다.
 5. 결과를 먼저 검토하려면 **클릭 즉시 마스크 반영**을 끄세요. 후보를
    선택하고 **Enter / Add Object**로 반영합니다.
 6. 점만으로 어려운 객체에는 **박스 (보조)**를 직접 지정하고 Preview를
@@ -29,7 +29,7 @@ Windows에서 실행하는 일반 객체 분할·측정 앱입니다. PoreSAM의
    **Ctrl+Z**는 프롬프트 또는 저장된 수정을 되돌립니다.
 8. **Save Images · 인스턴스 마스크**로 저장합니다. 보고서는 생성하지 않습니다.
 
-저장 폴더는 기존 파일을 덮어쓰지 않는 고유 이름으로 생성됩니다.
+저장 폴더는 기존 파일을 덮어쓰지 않도록 고유한 이름으로 생성됩니다.
 
 | 파일 | 내용 |
 | --- | --- |
@@ -43,41 +43,41 @@ Windows에서 실행하는 일반 객체 분할·측정 앱입니다. PoreSAM의
 색상 미리보기는 학습용 라벨 맵이 아닙니다. `instances.png`를 회색 영상으로
 8비트 변환하지 마세요. ID는 삭제 이력 때문에 연속되지 않을 수 있으며
 최대 65535입니다. 분석 영역 밖은 0으로 저장됩니다. 16비트 원본은
-학습용 `image.png`에 정규화되며 `original.*`에는 원본이 보존됩니다.
+학습용 `image.png`에서는 정규화되지만 `original.*`에는 원본 그대로 보존됩니다.
 
-## Report workspace (English UI)
+## Report 작업 공간 (영문 UI)
 
-Report mode uses the original image, with no preprocessing or automatic analysis.
+Report 모드에서는 전처리나 자동 분석을 거치지 않고 원본 이미지를 그대로 씁니다.
 
-1. Choose Report, load an image, optionally calibrate, and open the segmentation workspace.
-2. Segment an object with point prompts and apply it.
-3. In Manual measurements, choose the object and L (longitudinal) or W (transverse).
-4. Follow object (2 points): click the start and end on the object, then Save path. The app traces the shortest 8-connected path inside its mask and measures that full path. Points snap to object pixels within 5 pixels. Disconnected endpoints are rejected.
-5. Review the yellow route. To replace it, use Draw curve (drag) or Click curve points (successive clicks), then Save path. Drawn paths follow your input, may extend outside the mask, and sum all segment lengths without smoothing.
-6. Repeat for the other axis. L/W is the aspect ratio. Unmeasured values remain blank. Undo point edits the draft; Cancel discards it; Ctrl+Z undoes a saved change.
-7. Save Images exports the annotated figure, CSV and JSON including paths. Generate Report retains PDF, HWPX and Word export using the same measurements.
+1. Report를 선택해 이미지를 불러온 뒤 필요하면 스케일을 보정하고 분할 작업 공간을 엽니다.
+2. 점 프롬프트로 객체를 분할해 반영합니다.
+3. Manual measurements에서 객체를 고른 다음 L(종방향)이나 W(횡방향)를 선택합니다.
+4. Follow object (2 points): 객체 위에서 시작점과 끝점을 클릭하고 Save path를 누릅니다. 앱이 마스크 안에서 8방향으로 이어지는 최단 경로를 추적해 그 경로 전체의 길이를 측정합니다. 클릭한 점은 5픽셀 안에 있는 객체 픽셀로 달라붙습니다. 두 끝점이 서로 연결되지 않으면 거부합니다.
+5. 노란색 경로를 검토합니다. 경로를 바꾸고 싶으면 Draw curve(드래그)나 Click curve points(연속 클릭)로 그린 뒤 Save path를 누릅니다. 직접 그린 경로는 사용자가 입력한 모양을 그대로 따르며 마스크 밖으로 나갈 수도 있습니다. 길이는 평활화하지 않고 모든 구간을 합산해 구합니다.
+6. 다른 축도 같은 순서로 반복합니다. L/W 값이 종횡비이고 측정하지 않은 값은 빈칸으로 남습니다. 작성 중인 경로는 Undo point로 고치고 Cancel로 버립니다. 이미 저장한 변경은 Ctrl+Z로 되돌립니다.
+7. Save Images로는 주석이 달린 그림과 경로가 포함된 CSV·JSON을 내보냅니다. Generate Report에서도 같은 측정값으로 PDF, HWPX, Word 내보내기를 그대로 쓸 수 있습니다.
 
-Measurements apply to any segmented object. Area and perimeter come from the mask. Boundary objects are excluded from size statistics.
+분할한 객체는 모두 측정 대상입니다. 면적과 둘레는 마스크로 계산하며 경계에 걸린 객체는 크기 통계에서 제외합니다.
 
-## Measurement method
+## 측정 방법
 
-Two endpoints follow the selected mask, not a straight chord through the background. Both L and W support object-following and manually drawn paths. Labeling remains a separate automatic-segmentation and instance-mask export workflow.
+두 끝점 사이는 배경을 가로지르는 직선 현이 아니라 선택한 마스크를 따라 이어집니다. L과 W 모두 객체를 따라가는 경로와 직접 그린 경로를 쓸 수 있습니다. 라벨링은 자동 분할과 인스턴스 마스크 내보내기용 작업 흐름으로 따로 남겨 두었습니다.
 
-## Build
+## 빌드
 
-Use `.venv/Scripts/python.exe -m PyInstaller packaging/LabImage.spec --workpath build/labimage --noconfirm`. Distribute LabImage.exe together with its _internal directory.
+`.venv/Scripts/python.exe -m PyInstaller packaging/LabImage.spec --workpath build/labimage --noconfirm`로 빌드합니다. LabImage.exe는 _internal 폴더와 함께 배포해야 합니다.
 
-## Endpoint measurements and outside labels
+## 끝점 측정과 객체 밖 라벨
 
-Automatic center/L/W measurements are disabled. Select each axis and its two endpoints; Save path measures the curve inside the mask. Direct curve drawing remains available. Numeric values are placed outside the object with leader lines. Perpendicular end caps remain. Clear saved measurements removes both axes; Ctrl+Z restores them.
+중심/L/W 자동 측정은 꺼 두었습니다. 축을 하나 고르고 그 축의 두 끝점을 선택하면 Save path가 마스크 안쪽 곡선을 측정합니다. 곡선을 직접 그리는 기능도 그대로 쓸 수 있습니다. 수치는 지시선과 함께 객체 바깥에 배치하고 수직 끝선은 그대로 둡니다. Clear saved measurements는 두 축을 모두 지우는데 Ctrl+Z로 복원할 수 있습니다.
 
-## Center waypoint and end caps
+## 중심 경유점과 끝선
 
-The center point is automatic and visible before measurements. Both user-selected endpoints connect to this same center through the mask. L/W endpoints remain manual. Existing endpoint measurements use their saved ends with the center waypoint. Drawn curves retain the exact user path. End caps have a longer minimum length and extend across the local object section when wider.
+중심점은 앱이 자동으로 정해 측정 전에 화면에 표시합니다. 사용자가 고른 두 끝점은 마스크를 따라 같은 중심점으로 이어집니다. L/W 끝점은 수동으로 지정합니다. 기존의 끝점 측정은 저장된 끝점과 중심 경유점을 함께 씁니다. 직접 그린 곡선은 사용자가 그린 경로를 정확히 따릅니다. 끝선은 최소 길이가 더 길어졌으며 객체의 해당 단면이 더 넓으면 그 단면 전체에 걸치도록 늘어납니다.
 
-## Intel GPU runtime
+## Intel GPU 실행
 
-The app now defaults to auto device selection, preferring Intel GPU through OpenVINO when available. The official SAM 2.1 Small encoder and mask decoder execute on GPU; prompt preparation and file operations remain on CPU. The header identifies the active engine. First use compiles and caches GPU kernels and may take longer. Use --device intel-gpu to require GPU, or --device cpu to use CPU explicitly. GPU models are converted from the unchanged official checkpoint using FP16 weight storage. No fine-tuning is performed. Immediate labeling now skips redundant preview images and applies edits in one request.
+이제 앱의 기본값은 장치 자동 선택입니다. Intel GPU를 쓸 수 있으면 OpenVINO를 거쳐 GPU를 먼저 사용합니다. 공식 SAM 2.1 Small 인코더와 마스크 디코더는 GPU에서 실행하고 프롬프트 준비와 파일 작업은 그대로 CPU가 맡습니다. 지금 어떤 엔진을 쓰는지는 헤더에 나옵니다. 처음 사용할 때는 GPU 커널을 컴파일해 캐시하느라 시간이 더 걸릴 수 있습니다. GPU를 꼭 쓰려면 --device intel-gpu를, CPU를 명시적으로 지정하려면 --device cpu를 붙입니다. GPU 모델은 공식 체크포인트를 그대로 두고 가중치 저장 방식만 FP16으로 변환한 것입니다. 파인튜닝은 하지 않습니다. 즉시 라벨링은 이제 필요 없는 미리보기 이미지를 건너뛰고 수정을 요청 한 번에 반영합니다.
 
 ## 입자·튜브 측정 (Report)
 
@@ -86,7 +86,7 @@ Set up의 **Sample**에서 대상을 고릅니다.
 - **Particles**: 보정을 확인하면 입자를 자동으로 찾습니다. 왼쪽 원본, 오른쪽 선택된
   입자 화면에서 클릭·Shift+클릭으로 고르고 Delete로 지우거나, 빈 입자를 클릭해
   추가합니다. 다음 화면에서 길이(가장 긴 Feret 직경)와 너비(길이에 수직인 방향의
-  Feret 직경) 선을 고치고, Details에서 분포를 봅니다.
+  Feret 직경) 선을 고치고 Details에서 분포를 봅니다.
 - **Tubes (CNT)**: Tube 도구로 양 끝을 클릭해 곡선 길이를 재거나(Auto), 클릭한 점을
   직선으로 잇습니다(Manual). 너비는 한쪽 가장자리 선과 반대쪽 클릭으로 잽니다.
 
@@ -104,8 +104,8 @@ Load image 화면의 **Process a folder…**로 폴더를 고르면 그 안의 �
 `이름(2)`, `이름(3)` 그림과 CSV를 원본 옆에 저장합니다. 이미 (2)나 (3)이 있는 이미지는
 건너뜁니다. 결과는 **Open analysis**에서 열어 고친 뒤 다시 저장할 수 있습니다.
 
-## Updating
+## 업데이트
 
-On the Load image screen, **Check for updates** looks at the latest GitHub release. Most versions change only `LabImage.exe` and `_internal/ui`, so the release carries a small patch zip (about 50 MB): the app downloads it, closes, replaces those files and starts again. When the libraries or the model changed, it says a full install is needed instead.
+Load image 화면에서 **Check for updates**를 누르면 GitHub의 최신 릴리스를 확인합니다. 버전이 바뀌어도 대개 `LabImage.exe`와 `_internal/ui`만 달라지기 때문에 릴리스에는 작은 패치 zip(약 50 MB)이 들어 있습니다. 앱은 이 패치를 내려받아 종료한 뒤 해당 파일을 교체하고 다시 시작합니다. 라이브러리나 모델이 변경된 경우에는 패치 대신 전체 설치가 필요하다고 알려 줍니다.
 
-Releasing: set `VERSION` in `scripts/app_update.py` (and `BASE` to the same value when `_internal` changed), build, then publish the full zip and the patch `LabImage-v<version>-patch-from-v<BASE>.zip`.
+릴리스할 때는 `scripts/app_update.py`의 `VERSION`을 설정하고(`_internal`이 변경됐다면 `BASE`도 같은 값으로) 빌드한 뒤 전체 zip과 패치 `LabImage-v<version>-patch-from-v<BASE>.zip`을 게시합니다.
