@@ -484,8 +484,71 @@ class LabEditor(Editor):
         try: return json.loads(f.read_text(encoding='utf-8'))
         except (OSError, ValueError): return {}
 
+    # --- Batch: every image of a folder -> calibrate from its file, detect particles, save name(2)/(3) + CSVs beside it.
+    def batch_start(self, payload):
+        import re, threading
+        folder = Path(str(payload.get('directory') or ''))
+        if not folder.is_absolute() or not folder.is_dir(): raise ValueError('Choose an existing folder.')
+        if getattr(self, 'batch', None) and self.batch['running']: raise ValueError('A batch is already running.')
+        files = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg')
+                       and not re.search(r'\(\d+\)$', p.stem))   # name(2) / name(3) are results, not inputs
+        if not files: raise ValueError('No images in this folder.')
+        self.batch = dict(running=True, stop=False, folder=str(folder), total=len(files), done=0, current=None, results=[])
+        threading.Thread(target=self.batch_run, args=(files, payload.get('overwrite') is True), daemon=True).start()
+        return self.batch_status()
+
+    def batch_status(self):
+        return copy.deepcopy(getattr(self, 'batch', None) or dict(running=False, total=0, done=0, current=None, results=[]))
+
+    def batch_stop(self):
+        if getattr(self, 'batch', None): self.batch['stop'] = True
+        return self.batch_status()
+
+    def batch_run(self, files, overwrite):
+        b = self.batch
+        for path in files:
+            if b['stop']: break
+            b['current'] = path.name
+            row = dict(name=path.name)
+            try:
+                if not overwrite and any(path.with_name(f'{path.stem}({n}){path.suffix}').exists() for n in (2, 3)):
+                    row.update(status='skipped', note='already has (2) or (3)')
+                else: row.update(self.batch_one(path, overwrite))
+            except Exception as error:   # one bad image must not stop the folder
+                row.update(status='failed', note=str(error))
+            b['results'].append(row); b['done'] += 1
+        b.update(running=False, current=None)
+
+    def batch_one(self, path, overwrite):
+        import time
+        content = path.read_bytes()
+        opened = self.receive_image(path.name, content)
+        self.remember_source(hashlib.sha256(content).hexdigest(), path)
+        project = self.workflow.inspect(opened['project']['id'] if 'project' in opened else opened['image']['project_id'])
+        c, meta = project['config'], project.get('scale_metadata') or {}
+        pixels = meta.get('length_pixels') or (c.get('scale_pixels') if c.get('calibrated') else None) or 100
+        scale = meta.get('label_um') or (pixels*meta['um_per_pixel'] if meta else c.get('scale_um') if c.get('calibrated') else None)
+        config = dict(analysis_bottom=c['analysis_bottom'], preprocessing_mode='adjustable', normalize_enabled=False, background_strength=0, blur_method='none',
+            blur_strength=0, scale_um=scale or 1, scale_pixels=pixels if scale else 1, min_contrast=0, min_area_pixels=1, points_per_side=16,
+            scale_confirmed=True, workspace_mode='report', calibrated=bool(scale))
+        job = self.workflow.start(project['id'], config)['job_id']
+        while True:
+            status = self.workflow.status(job)
+            if status['status'] in ('complete', 'failed', 'cancelled'): break
+            if self.batch['stop']: self.workflow.cancel(job)
+            time.sleep(.2)
+        if status['status'] != 'complete': raise ValueError(status.get('message') or 'Analysis did not finish.')
+        with self.lock:
+            state = self.state(status['dataset'])
+            try: found = self.detect_particles(state, dict(revision=state['revision']))
+            except ValueError as error: return dict(status='no particles', note=str(error), dataset=status['dataset'])
+            self.save_labels(state, dict(overwrite=overwrite))
+        return dict(status='saved', particles=len(found['object_ids']), excluded=sum(found['excluded'].values()),
+                    unit='µm' if scale else 'px', dataset=status['dataset'])
+
     def remember_source(self, digest, path):
         paths = self.source_paths(); paths[digest] = str(path)
+        self.output_root.mkdir(parents=True, exist_ok=True)   # a fresh install has no edits folder yet
         (self.output_root/'source_paths.json').write_text(json.dumps(paths, ensure_ascii=False, indent=1), encoding='utf-8')
 
     def measure_tube(self, state, payload):
@@ -573,7 +636,7 @@ def make_handler(editor):
             return super().do_GET()
 
         def do_POST(self):
-            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/save-labels','/api/choose-image'):
+            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop'):
                 return super().do_POST()
             if not self.valid_host() or self.headers.get('X-Object-Editor') != '1':
                 return self.send(403, dict(error='Local access only'))
@@ -584,6 +647,9 @@ def make_handler(editor):
                 length = int(self.headers.get('Content-Length','0'))
                 if not 0 < length <= 1_000_000: raise ValueError('Invalid request size.')
                 payload = json.loads(self.rfile.read(length))
+                if self.path == '/api/batch-particles': return self.send(200, editor.batch_start(payload))
+                if self.path == '/api/batch-status': return self.send(200, editor.batch_status())
+                if self.path == '/api/batch-stop': return self.send(200, editor.batch_stop())
                 if self.path == '/api/choose-image':   # desktop Open dialog: the image's folder is remembered for Save image
                     picker = getattr(editor, 'image_picker', None)
                     if not picker: raise ValueError('Use the desktop app to choose an image.')

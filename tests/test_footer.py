@@ -70,3 +70,10 @@ def test_scale_and_info_bar_from_the_tescan_header(tmp_path):
     assert config['calibrated'] is True and config['scale_um'] == 200 and abs(config['scale_um']/config['scale_pixels']-.9089) < 2e-3   # the bar's printed 200 µm
     assert project['footer_detection']['bottom'] == 768 and project['scale_metadata']['um_per_pixel'] == header['um_per_pixel']
     assert tescan_header(tmp_path/'missing.tif') == {}
+
+
+def test_source_path_is_remembered_on_a_fresh_install(tmp_path):
+    from lab_editor import LabEditor
+    editor = LabEditor(output_root=tmp_path/'not'/'there'/'yet', project_root=tmp_path/'projects', device='cpu')
+    editor.remember_source('abc', tmp_path/'image.tif')   # used to fail: the edits folder does not exist before the first save
+    assert editor.source_paths() == {'abc': str(tmp_path/'image.tif')}

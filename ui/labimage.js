@@ -295,6 +295,38 @@ const labSavedDialog=document.createElement('dialog');labSavedDialog.id='labSave
 labSavedDialog.innerHTML=`<div class="dialog-head"><h2 id="labSavedTitle">${window.labIcon('check','saved-icon')}Saved</h2></div><p class="hint">Check the figures and tables in this folder:</p><p id="labSavedFolder" class="saved-folder"></p><ul id="labSavedFiles" class="saved-files"></ul><div class="row"><button id="labSavedOk" class="primary" type="button">OK</button></div>`;
 document.body.append(labSavedDialog);
 $('labSavedOk').onclick=()=>labSavedDialog.close();
+// Batch: every image of a folder is calibrated from its file, detected and saved beside the original (name(2), name(3), CSVs).
+// Nothing is replaced: images that already have (2) or (3) are skipped. Each result can be reviewed later from Open analysis.
+$('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-report-only"><button id="labBatch" type="button" title="Detect particles in every image of a folder and save name(2), name(3) and CSV files beside each image. Images that already have (2) or (3) are skipped.">Process a folder…</button></div>');
+const labBatchDialog=document.createElement('dialog');labBatchDialog.id='labBatchDialog';labBatchDialog.setAttribute('aria-labelledby','labBatchTitle');
+labBatchDialog.innerHTML='<div class="dialog-head"><h2 id="labBatchTitle">Process a folder</h2></div><p id="labBatchFolder" class="saved-folder"></p><p id="labBatchState" class="hint" role="status"></p><progress id="labBatchBar" max="1" value="0" aria-label="Batch progress"></progress><div class="results-wrap"><table class="results"><caption class="sr-only">Batch results</caption><thead><tr><th scope="col">Image</th><th scope="col">Result</th></tr></thead><tbody id="labBatchRows"></tbody></table></div><div class="row"><button id="labBatchStop" type="button">Stop</button><button id="labBatchClose" class="primary" type="button">Close</button></div>';
+document.body.append(labBatchDialog);
+let labBatchTimer=0;
+function labBatchShow(b){
+  const text=r=>r.status==='saved'?`${r.particles} particle${r.particles===1?'':'s'} saved, ${r.excluded} left out${r.unit==='px'?' (px: no scale in file)':''}`:r.status==='skipped'?'Skipped: '+r.note:r.status==='no particles'?'No measurable particle':'Failed: '+(r.note||'');
+  $('labBatchFolder').textContent=b.folder||'';$('labBatchBar').max=b.total||1;$('labBatchBar').value=b.done;
+  const n=k=>b.results.filter(r=>r.status===k).length;
+  $('labBatchState').textContent=b.running?`${b.done} / ${b.total}${b.current?' · '+b.current:''}`:`Done: ${n('saved')} saved, ${n('skipped')} skipped, ${n('no particles')} without particles, ${n('failed')} failed.`;
+  $('labBatchRows').replaceChildren(...b.results.map(r=>{const tr=el('tr');tr.append(el('td','',r.name),el('td',r.status==='failed'?'error':'',text(r)));return tr}));
+  $('labBatchStop').hidden=!b.running;$('labBatchClose').disabled=b.running;
+}
+async function labBatchPoll(){
+  clearTimeout(labBatchTimer);
+  let b;try{b=await api('batch-status',{})}catch(error){$('labBatchState').textContent=error.message;$('labBatchClose').disabled=false;return}
+  labBatchShow(b);
+  if(b.running)labBatchTimer=setTimeout(labBatchPoll,1000);else refreshLists?.();
+}
+$('labBatch').onclick=async()=>{
+  try{
+    const picked=await api('choose-export-folder',{});if(!picked.directory)return;
+    labBatchShow(await api('batch-particles',{directory:picked.directory}));
+    if(!labBatchDialog.open)labBatchDialog.showModal();
+    labBatchTimer=setTimeout(labBatchPoll,1000);
+  }catch(error){setStatus(error.message,true);jobMessage?.(error.message,true)}
+};
+$('labBatchStop').onclick=async()=>{$('labBatchStop').disabled=true;try{await api('batch-stop',{})}finally{$('labBatchStop').disabled=false}};
+$('labBatchClose').onclick=()=>labBatchDialog.close();
+labBatchDialog.addEventListener('cancel',event=>{if($('labBatchClose').disabled)event.preventDefault()}); // Esc does not hide a running batch
 function labShowSaved(paths){
   const split=p=>{const i=Math.max(p.lastIndexOf('/'),p.lastIndexOf('\\'));return [p.slice(0,i),p.slice(i+1)]};
   $('labSavedFolder').textContent=split(paths[0])[0];

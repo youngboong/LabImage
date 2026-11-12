@@ -312,3 +312,21 @@ def test_width_end_lines_touch_the_particle_and_match():
         d = direction(p, q); foot = p+((t-p)@d)*d
         assert np.linalg.norm(t-foot) < 1.5 and -1e-6 <= (t-p)@d <= np.linalg.norm(q-p)+1e-6   # the touch point lies on the end line
     assert len(particle_segments(f['width_line'], touch=[[0, 0], [5, 5]])) == 3   # foreign touch points are ignored
+
+
+def test_batch_lists_only_originals_and_refuses_bad_folders(tmp_path, monkeypatch):
+    from lab_editor import LabEditor
+    editor = LabEditor(output_root=tmp_path/'edits', project_root=tmp_path/'projects', device='cpu')
+    folder = tmp_path/'images'; folder.mkdir()
+    for name in ('a.tif', 'a(2).tif', 'a(3).tif', 'b.png', 'notes.txt'): (folder/name).write_bytes(b'x')
+    seen = []
+    monkeypatch.setattr(editor, 'batch_one', lambda path, overwrite: seen.append(path.name) or dict(status='saved', particles=1, excluded=0, unit='µm'))
+    editor.batch_start(dict(directory=str(folder)))
+    for _ in range(100):
+        if not editor.batch_status()['running']: break
+        import time; time.sleep(.02)
+    status = editor.batch_status()
+    assert seen == ['b.png'] and status['total'] == 2 and not status['running']   # a.tif already has (2)/(3): skipped, never replaced
+    assert [(r['name'], r['status']) for r in status['results']] == [('a.tif', 'skipped'), ('b.png', 'saved')]
+    for bad in (dict(directory=str(tmp_path/'missing')), dict(directory='relative'), {}):
+        with pytest.raises(ValueError): editor.batch_start(bad)

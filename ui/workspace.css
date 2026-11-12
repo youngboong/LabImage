@@ -632,3 +632,14 @@ html{scrollbar-gutter:stable}
 
 /* Particle flow: the results table may use the free height of the inspector */
 body[data-tool="particle"] .results-wrap{max-height:min(60vh,640px)}
+
+#labBatchDialog{width:min(640px,calc(100vw - 32px))}
+#labBatchDialog progress{width:100%}
+#labBatchDialog .results-wrap{max-height:320px;margin:8px 0}
+#labBatchDialog td.error{color:var(--danger)}
+#labBatchDialog{overflow-x:hidden}
+#labBatchDialog .results{width:100%;min-width:0;table-layout:fixed}
+#labBatchDialog .results th,#labBatchDialog .results td{white-space:normal;overflow-wrap:break-word;text-align:left}
+#labBatchDialog .results-wrap{margin:8px 16px}
+#labBatchDialog progress{display:block;margin:0 16px;width:calc(100% - 32px)}
+#labBatchDialog .results th:last-child,#labBatchDialog .results td:last-child{width:55%;padding:var(--sp-2) var(--sp-3);text-align:left}
