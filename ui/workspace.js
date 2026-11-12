@@ -44,7 +44,9 @@ function setLoadMode(mode){
   $('newImagePane').classList.toggle('hidden',!fresh);$('savedImagePane').classList.toggle('hidden',fresh);
   for(const [id,active] of [['newImageTab',fresh],['openAnalysisTab',!fresh]]){$(id).classList.toggle('active',active);$(id).setAttribute('aria-selected',String(active))}
 }
-$('newImageTab').onclick=()=>setLoadMode('new');$('openAnalysisTab').onclick=()=>setLoadMode('saved');
+$('newImageTab').onclick=()=>setLoadMode('new');$('openAnalysisTab').onclick=()=>{setLoadMode('saved');document.querySelector('.image-card.last-opened')?.scrollIntoView({block:'nearest'})};
+// The analysis opened last is marked in Open analysis, so a review of many images can continue from it. Per PC (localStorage).
+const lastOpenedImage=()=>{try{return localStorage.getItem('labLastOpenedImage')}catch{return null}};
 function jobMessage(message,error=false){$('jobStatus').textContent=message;$('jobStatus').classList.toggle('error',error);$('imageSelectionStatus').textContent=message;$('imageSelectionStatus').classList.toggle('error',error)}
 async function workspaceWork(message,fn){
   await work(message,async()=>{jobMessage(message);try{await fn()}catch(error){jobMessage(error.message,true);throw error}});
@@ -81,6 +83,7 @@ function renderImageLibrary(){
     const thumbnail=document.createElement('img');thumbnail.src=entry.preview_url;thumbnail.alt='';thumbnail.loading='lazy';
     const name=document.createElement('strong');name.textContent=entry.name;
     const action=document.createElement('span');action.className='image-action';action.textContent=entry.analyzed?'Open analysis':'Set up';
+    if(entry.id===lastOpenedImage()){card.classList.add('last-opened');action.textContent='Open analysis · last opened'}
     card.append(thumbnail,name,action);card.onclick=()=>workspaceWork('Loading image…',async()=>selectImage(await api('open-image',{image_id:entry.id})));
     $('imageLibrary').append(card);
   }
@@ -89,6 +92,7 @@ function renderImageLibrary(){
 }
 async function selectImage(selection){
   if(selection.dataset){
+    if(selection.image?.id)try{localStorage.setItem('labLastOpenedImage',selection.image.id)}catch{}
     previewGeneration++;previewPending=false;setupProject=null;setupImage=null;$('newAnalysisSettings').classList.add('hidden');
     await refreshLists();updateHistory(selection.dataset);
     await accept(await api('load',{dataset:selection.dataset}));showPanel('editor');

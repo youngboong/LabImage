@@ -75,14 +75,14 @@ def measure_masks(masks, shape, um_per_pixel, grid=(3, 4), gray=None, manual=Non
                          skeleton_branch_pixels=object_geometry['skeleton_branch_pixels'],
                          skeleton_cycles_cut=object_geometry['skeleton_cycles_cut'],
                          length_method=object_geometry['length_method'],
-                         max_feret_um=object_geometry['max_feret_pixels']*um_per_pixel,
+                         max_feret_um=object_geometry['max_feret_pixels']*um_per_pixel, min_feret_um=object_geometry['min_feret_pixels']*um_per_pixel,
                          grid_row=gy+1, grid_column=gx+1, review_status="unreviewed", complete=not edge,
                          **extra_metrics(cropped, yy, xx, covariance, um_per_pixel, gray)))
     columns = ["candidate_id", "area_pixels", "area_um2", "equivalent_diameter_um", "perimeter_um", "circularity", "circularity_raw", "touches_image_edge",
                "length_um", "width_um", "aspect_ratio", "roundness", "roundness_raw",
                "included_in_size_distribution", "centroid_x_pixels", "centroid_y_pixels", "centroid_x_um",
                "centroid_y_um", "grid_row", "grid_column", "review_status"]
-    frame = pd.DataFrame(rows, columns=columns+EXTRA_COLUMNS+['skeleton_components','skeleton_branch_pixels','skeleton_cycles_cut','length_method','max_feret_um'])
+    frame = pd.DataFrame(rows, columns=columns+EXTRA_COLUMNS+['skeleton_components','skeleton_branch_pixels','skeleton_cycles_cut','length_method','max_feret_um','min_feret_um'])
     interior = frame[frame["included_in_size_distribution"].astype(bool)]
     analyzed_area = h*w*um_per_pixel**2
     union_area = int(union.sum())*um_per_pixel**2

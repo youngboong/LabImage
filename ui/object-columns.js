@@ -4,6 +4,7 @@ window.poreColumnCatalog=[
   ['length_um','Length (µm)','Longest weighted centerline path. Cycles are cut; disconnected masks use the longest component.'],
   ['width_um','Width (µm)','Minimum Feret width across the convex hull of pixel cells.'],
   ['max_feret_um','Max Feret (µm)','Maximum straight Feret diameter.'],
+  ['min_feret_um','Min Feret (µm)','Minimum Feret diameter of the outline: the narrowest gap between two parallel lines that hold it. Not changed by lines you draw.'],
   ['skeleton_components','Components','Number of disconnected skeleton components.'],
   ['skeleton_branch_pixels','Branch pixels','Skeleton pixels with more than two neighbors; review branched objects.'],
   ['skeleton_cycles_cut','Cycles cut','Edges removed to form the skeleton forest.'],
@@ -35,7 +36,7 @@ window.poreColumnCatalog=[
 ];
 window.createPoreColumnPicker=onChange=>{
   const catalog=window.poreColumnCatalog,byKey=new Map(catalog.map(item=>[item[0],item]));
-  const defaults=['candidate_id','length_um','width_um','aspect_ratio','area_um2','perimeter_um','max_feret_um','complete'],storageKey='labVisibleColumns.v1';
+  const defaults=['candidate_id','length_um','width_um','aspect_ratio','area_um2','perimeter_um','max_feret_um','min_feret_um','complete'],storageKey='labVisibleColumns.v1';
   let columns=defaults.slice(),draft=[];
   try{const saved=JSON.parse(localStorage.getItem(storageKey));if(Array.isArray(saved)){const valid=[...new Set(saved)].filter(key=>byKey.has(key));if(valid.length)columns=valid}}catch{}
   const button=document.createElement('button');button.id='openDetailsColumns';button.type='button';button.className='icon-button';

@@ -294,6 +294,8 @@ const labSavedDialog=document.createElement('dialog');labSavedDialog.id='labSave
 labSavedDialog.innerHTML=`<div class="dialog-head"><h2 id="labSavedTitle">${window.labIcon('check','saved-icon')}Saved</h2></div><p class="hint">Check the figures and tables in this folder:</p><p id="labSavedFolder" class="saved-folder"></p><ul id="labSavedFiles" class="saved-files"></ul><div class="row"><button id="labSavedOk" class="primary" type="button">OK</button></div>`;
 document.body.append(labSavedDialog);
 $('labSavedOk').onclick=()=>labSavedDialog.close();
+// Enter closes it too. The OK button cannot take focus when the dialog opens (buttons are disabled while saving), so the key is caught on the document.
+document.addEventListener('keydown',event=>{if(event.key==='Enter'&&labSavedDialog.open){event.preventDefault();event.stopImmediatePropagation();labSavedDialog.close()}},true);
 // Batch: every image of a folder is calibrated from its file, detected and saved beside the original (name(2), name(3), CSVs).
 // Nothing is replaced: images that already have (2) or (3) are skipped. Each result can be reviewed later from Open analysis.
 $('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-report-only"><button id="labBatch" type="button" title="Detect particles in every image of a folder and save name(2), name(3) and CSV files beside each image. Images that already have (2) or (3) are skipped.">Process a folder…</button></div>');

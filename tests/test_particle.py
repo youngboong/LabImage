@@ -29,6 +29,12 @@ def scene(shape, masks, level=80, base=60):
     return gray
 
 
+def min_extent(mask):
+    """Narrowest projection extent of the pixel cells over 0.5 degree steps (brute force)."""
+    yy, xx = np.nonzero(mask); p = (np.stack([xx, yy], 1)[:, None, :]+np.array([[-.5, -.5], [-.5, .5], [.5, -.5], [.5, .5]])[None]).reshape(-1, 2)
+    th = np.radians(np.arange(0, 180, .5)); return float(np.ptp(p@np.stack([np.cos(th), np.sin(th)]), axis=0).min())
+
+
 @pytest.mark.parametrize('angle', [0, 30, 75])
 def test_ellipse_length_and_widths(angle):
     m = ellipse((300, 300), (150, 150), (80, 35), angle)
@@ -39,30 +45,27 @@ def test_ellipse_length_and_widths(angle):
     assert f['solidity'] > .95
     a, b = np.array(f['length_line']), np.array(f['width_line'])
     assert np.linalg.norm(b[1]-b[0]) == pytest.approx(f['width_px'], abs=1e-6)
-    assert abs((a[1]-a[0])@(b[1]-b[0]))/(f['length_px']*f['width_px']) < 1e-6
-    mid, u = (a[0]+a[1])/2, (b[1]-b[0])/f['width_px']
-    assert abs((mid-b[0])@np.array([-u[1], u[0]])) < .6 and 0 < (mid-b[0])@u < f['width_px']   # the width line passes through the middle of the length line
+    assert f['width_px'] <= min_extent(m)+1e-6   # no direction is narrower: this is the minimum Feret
 
 
-def test_rotated_rectangle_width_is_the_perpendicular_feret():
+def test_rotated_rectangle_width_is_the_minimum_feret():
     c, th = np.array([150., 150.]), np.radians(30)
     R = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
     m = polygon((300, 300), c+np.array([[-50, -20], [50, -20], [50, 20], [-50, 20]])@R.T)
     f = feret_measure(m)
     assert f['length_px'] == pytest.approx(np.hypot(100, 40), abs=1.5)   # the diagonal
-    assert f['width_px'] == pytest.approx(74.3, abs=1.5)                 # Feret perpendicular to the diagonal: the projection extent
-    assert f['width_caliper_px'] == f['width_px'] and f['width_chord_px'] == pytest.approx(43.1, abs=1.5)   # the old mid-chord is kept
+    assert f['width_px'] == pytest.approx(41, abs=1.5)                   # the short side, not the 74 px extent perpendicular to the diagonal
+    assert f['width_caliper_px'] == f['width_px'] and f['width_chord_px'] == pytest.approx(43.1, abs=1.5)   # the mid-chord is kept for the standing rule
     a, b = np.array(f['length_line']), np.array(f['width_line'])
-    assert np.linalg.norm(b[1]-b[0]) == pytest.approx(f['width_px'], abs=1e-6) and abs((a[1]-a[0])@(b[1]-b[0]))/(f['length_px']*f['width_px']) < 1e-6
+    assert np.linalg.norm(b[1]-b[0]) == pytest.approx(f['width_px'], abs=1e-6)
+    u = (b[1]-b[0])/f['width_px']; assert abs(abs(u@R[:, 1])-1) < .02   # the width line runs along the short side
 
 
 def test_notched_shape_width_spans_the_notch():
     m = np.zeros((200, 200), bool); m[50:150, 40:60] = True; m[50:150, 100:120] = True; m[130:150, 40:120] = True   # U: two arms joined at the bottom
     m[50:90, 60:100] = False
     f = feret_measure(m)
-    a = np.array(f['length_line']); d = (a[1]-a[0])/f['length_px']; n = np.array([-d[1], d[0]])
-    yy, xx = np.nonzero(m); proj = (np.stack([xx, yy], 1)[:, None, :]+np.array([[-.5, -.5], [-.5, .5], [.5, -.5], [.5, .5]])[None])@n
-    assert f['width_px'] == pytest.approx(np.ptp(proj), abs=1e-3) and f['width_chord_px'] < f['width_px']   # the notch cuts the mid-chord short
+    assert f['width_px'] == pytest.approx(80, abs=1e-6) and f['width_px'] <= min_extent(m)+1e-6   # outer width of the U: the notch does not shorten it
     line = np.array(f['width_line']); assert np.linalg.norm(line[1]-line[0]) == pytest.approx(f['width_px'], abs=1e-6)
     one = np.zeros((50, 50), bool); one[20, 10:40] = True
     assert 1 <= feret_measure(one)['width_px'] < 2.1   # a 1-px line is a cell or two wide (the diagonal tilts the normal), not 0
@@ -305,7 +308,7 @@ def test_width_end_lines_touch_the_particle_and_match():
     f = feret_measure(mask)
     line, first, second = particle_segments(f['width_line'], touch=f['width_touch'])
     lengths = [float(np.linalg.norm(q-p)) for p, q in (first, second)]
-    assert abs(lengths[0]-lengths[1]) < 1e-6 and lengths[0] > 9   # equal and long enough to reach
+    assert abs(lengths[0]-lengths[1]) < 1e-6 and lengths[0] >= 9-1e-6   # equal and long enough to reach
     direction = lambda p, q: (q-p)/np.linalg.norm(q-p)
     assert abs(abs(direction(*first)@direction(*second))-1) < 1e-9   # parallel
     for (p, q), t in zip((first, second), np.asarray(f['width_touch'])):

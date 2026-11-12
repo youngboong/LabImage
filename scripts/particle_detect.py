@@ -1,7 +1,8 @@
 """Flake/particle length and width from a mask, and the rules that decide which SAM masks are measurable particles.
 
-Length = maximum Feret diameter on the outline (pixel corners). Width = the Feret diameter perpendicular to the length (caliper: max minus
-min projection of the outline on the length's normal); the outline-to-outline chord through the middle of the length line is kept as width_chord_px."""
+Length = maximum Feret diameter on the outline (pixel corners). Width = minimum Feret diameter (ISO 9276-6 x_Fmin: the narrowest gap between two
+parallel tangents; it need not be perpendicular to the length). The outline-to-outline chord through the middle of the length line, perpendicular
+to it, is kept as width_chord_px for the standing rule."""
 import cv2
 import numpy as np
 from scipy import ndimage as ndi
@@ -40,14 +41,21 @@ def feret_measure(mask):
     pts = (np.concatenate(cs).reshape(-1, 2).astype(float)[:, None, :]+CORNERS[None]).reshape(-1, 2)
     h = cv2.convexHull(pts.astype(np.float32)).reshape(-1, 2).astype(float)
     dd = np.linalg.norm(h[:, None]-h[None], axis=2); i, j = np.unravel_index(dd.argmax(), dd.shape)
-    a, b = h[i], h[j]; d = (b-a)/dd[i, j]; n = np.array([-d[1], d[0]])
-    p = h@n; lo, hi = p.argmin(), p.argmax()
-    chord_px, line = chord(mask, (a+b)/2, n)
-    caliper = float(p[hi]-p[lo])
-    s = ((h[lo]+h[hi])/2)@d   # along the length: midway between the two extreme outline points
-    line = (d*s+n*p[lo], d*s+n*p[hi])
+    a, b = h[i], h[j]; d = (b-a)/dd[i, j]
+    chord_px, _ = chord(mask, (a+b)/2, np.array([-d[1], d[0]]))
+    # Minimum Feret: the narrowest pair of parallel tangents always has one tangent lying on a hull edge, so each edge is tried.
+    e = np.roll(h, -1, 0)-h; el = np.linalg.norm(e, axis=1)
+    normals = np.stack([-e[:, 1], e[:, 0]], 1)/np.maximum(el, 1e-9)[:, None]
+    reach = np.abs(np.einsum('kj,ij->ik', h, normals)-np.einsum('ij,ij->i', h, normals)[:, None])   # [edge, hull point] distance from the edge's line
+    reach[el < 1e-9] = np.inf
+    k = int(reach.max(1).argmin()); far = h[int(reach[k].argmax())]
+    n, t = normals[k], e[k]/el[k]
+    if (far-h[k])@n < 0: n = -n
+    caliper = float((far-h[k])@n)
+    s = float(np.clip(far@t, h[k]@t, h[k]@t+el[k]))   # the line runs from the edge to the opposite outline point
+    line = (t*s+n*(h[k]@n), t*s+n*(far@n))
     return dict(length_px=float(dd[i, j]), length_line=[a.tolist(), b.tolist()], width_px=caliper, width_line=[line[0].tolist(), line[1].tolist()],
-                width_touch=[h[lo].tolist(), h[hi].tolist()],   # where the two width tangents touch the outline
+                width_touch=[line[0].tolist(), far.tolist()],   # where the two width tangents touch the outline
                 width_caliper_px=caliper, width_chord_px=chord_px or caliper, solidity=float(mask.sum()/max(cv2.contourArea(h.astype(np.float32)), 1)))
 
 

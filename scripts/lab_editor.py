@@ -27,11 +27,11 @@ def tube_annotation(c, kind='td'):
 
 
 def particle_annotation(measure, source, features=None, warning=None):
-    """Straight Feret length + perpendicular Feret (caliper) width of one flake; the lines feed the same table/CSV path as a tube's manual lines."""
+    """Maximum Feret length + minimum Feret width of one flake; the lines feed the same table/CSV path as a tube's manual lines."""
     lines = dict(length=measure.get('length_line'), width=measure.get('width_line'))
     present = {k: v for k, v in lines.items() if v is not None}
     return dict(source=f'particle_{source}', supplemental=True, review_status='user_accepted', manual_measurements=present,
-        measurement_methods={k: 'manual_line' if source == 'manual' else 'auto_feret' if k == 'length' else 'auto_feret_perpendicular' for k in present},
+        measurement_methods={k: 'manual_line' if source == 'manual' else 'auto_feret' if k == 'length' else 'auto_feret_min' for k in present},
         particle=dict(length_line=lines['length'], width_line=lines['width'], length_px=measure.get('length_px'), width_px=measure.get('width_px'),
                       width_caliper_px=measure.get('width_caliper_px'), width_chord_px=measure.get('width_chord_px'), width_touch=measure.get('width_touch'),
                       source=source, features=features or {}, warning=warning))
@@ -357,7 +357,7 @@ class LabEditor(Editor):
         return result
 
     def measure_particle(self, state, payload):
-        """One click: SAM mask under the point -> Feret length + perpendicular Feret width. Rules are not applied; the one that would fire is a warning."""
+        """One click: SAM mask under the point -> maximum Feret length + minimum Feret width. Rules are not applied; the one that would fire is a warning."""
         from particle_detect import FEATURE_KEYS, exclusion_reason, particle_features
         from scipy import ndimage as ndi
         ump = self.particle_mode(state)

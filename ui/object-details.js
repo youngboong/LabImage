@@ -3,7 +3,7 @@
   const metrics=window.poreColumnCatalog.filter(item=>!item[3]),labels=Object.fromEntries(metrics.map(([key,label])=>[key,label]));
   const tableColumns=window.createPoreColumnPicker(()=>{sortKey='candidate_id';sortAscending=true;renderTable()});
   // Particle rows (Report, Particles): every Details item stays available (as in PoreSAM); Length and Width are the Feret lines and Source is added.
-  const particleColumns=[['candidate_id','ID','Particle number on the figure.','id'],['length_um','Length (µm)','Longest Feret diameter, or the length line you drew.'],['width_um','Width (µm)','Feret diameter perpendicular to the length, or the width line you drew.'],['particle_source','Source','Auto: Detect particles. Click: added with one click. Manual line: drawn by hand.','text']];
+  const particleColumns=[['candidate_id','ID','Particle number on the figure.','id'],['length_um','Length (µm)','Longest Feret diameter, or the length line you drew.'],['width_um','Width (µm)','Minimum Feret diameter (narrowest gap between two parallel lines), or the width line you drew.'],['particle_source','Source','Auto: Detect particles. Click: added with one click. Manual line: drawn by hand.','text']];
   const particleSource={auto:'Auto',click:'Click',manual:'Manual line'},sourceText=row=>{const v=row.particle_source??row.particle?.source;return v==null?'':particleSource[v]??String(v)};
   let particleView=false;
   const particleHelp=Object.fromEntries(particleColumns.map(([key,,help])=>[key,help]));
@@ -19,7 +19,7 @@
     for(const select of [$('detailsXAxis'),$('detailsYAxis')]){select.replaceChildren();metrics.forEach(([key,label])=>select.add(new Option(label,key)))}
     $('detailsXAxis').value=next?'length_um':'equivalent_diameter_um';$('detailsYAxis').value=next?'width_um':'roundness';
     document.title=window.detailsTitle();
-    if(definitions)definitions.textContent=next?'Length = longest Feret diameter, Width = Feret diameter perpendicular to it (or the lines you drew). Other items come from the particle outline; they are blank for particles drawn only as lines. '+(objectDefinitions??''):objectDefinitions;
+    if(definitions)definitions.textContent=next?'Length = longest Feret diameter, Width = minimum Feret diameter, which need not be perpendicular to the length (or the lines you drew). Other items come from the particle outline; they are blank for particles drawn only as lines. '+(objectDefinitions??''):objectDefinitions;
   }
   const format=value=>value==null||!Number.isFinite(value)?'—':value.toLocaleString(undefined,{maximumFractionDigits:3,minimumFractionDigits:3});
   let data=null,selectedIds=new Set(),allSelected=true,view='table',points=[],bars=[],plotRows=[],lastPlot=null;

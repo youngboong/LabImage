@@ -110,7 +110,7 @@ def geometry(mask, compact_fallback=True, extend_ends=True):
             else: path = np.vstack((path,last))
     return dict(length_pixels=best_length, width_pixels=float(best[0]),
                 length_path=path.tolist(), width_line=np.asarray(best[1]).tolist(),
-                max_feret_pixels=max_feret, length_method=method,
+                max_feret_pixels=max_feret, min_feret_pixels=float(best[0]), length_method=method,
                 skeleton_components=int(count), skeleton_branch_pixels=int((degrees > 2).sum()),
                 skeleton_cycles_cut=int(len(weights)-forest.nnz//2))
 
