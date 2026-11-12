@@ -452,8 +452,7 @@ class LabEditor(Editor):
         stem, suffix = (source.stem, source.suffix) if source else (name.stem, name.suffix if name.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg') else '.png')
         targets = [folder/f'{stem}(2){suffix}', folder/f'{stem}(3){suffix}']
         tables = [folder/f'{stem}(2).csv', folder/f'{stem}(3).csv']   # T# lengths / D# widths, as on the figures
-        existing = [t.name for t in targets+tables if t.exists()]
-        if existing and payload.get('overwrite') is not True: return dict(exists=existing, folder=str(folder))
+        # Existing name(2) / name(3) files are replaced without asking: saving again after an edit is the normal case.
         for target, (length, width) in zip(targets, ((True, False), (False, True))):
             figure = self.label_figure(state, length, width, int(payload.get('font_size', 16)))
             partial = target.with_name('.'+target.name+'.partial')

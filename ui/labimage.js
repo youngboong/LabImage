@@ -282,7 +282,6 @@ $('saveEditorImages').onclick=()=>work('Saving images…',async()=>{
     const body={...payload(),font_size:Number($('labFontSize').value)};
     let saved=await api('save-labels',body);
     if(saved.need_folder){const picked=await api('choose-export-folder',{});if(!picked.directory){setStatus('Save cancelled.');return}body.directory=picked.directory;saved=await api('save-labels',body)}
-    if(saved.exists){if(!confirm(`${saved.exists.join(', ')} already exist in ${saved.folder}. Replace them?`)){setStatus('Save cancelled. Nothing was replaced.');return}saved=await api('save-labels',{...body,overwrite:true})}
     if(saved.saved){setStatus('Saved '+saved.saved.join(', '));labShowSaved(saved.saved);return}
   }
   const picked=await api('choose-export-folder',{});if(!picked.directory){setStatus('Export cancelled.');return}

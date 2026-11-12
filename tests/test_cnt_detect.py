@@ -576,5 +576,6 @@ def test_save_labels_beside_the_original(tmp_path, monkeypatch):
     assert two.shape == (gray.shape[0]+40, gray.shape[1], 3)   # whole image, info bar included
     yellow = lambda a: ((a[..., 0] > 200) & (a[..., 1] > 200) & (a[..., 2] < 80)).sum()
     assert yellow(two) > 0 and yellow(three) > 0 and not np.array_equal(two, three)
-    assert editor.save_labels(state, {})['exists'] == ['CNT_x-1(2).tif', 'CNT_x-1(3).tif', 'CNT_x-1(2).csv', 'CNT_x-1(3).csv']   # never replaced without asking
-    assert len(editor.save_labels(state, dict(overwrite=True))['saved']) == 4
+    Path(saved['saved'][2]).write_text('stale')
+    again = editor.save_labels(state, {})   # saving again replaces the files without asking
+    assert again['saved'] == saved['saved'] and Path(saved['saved'][2]).read_text(encoding='utf-8-sig').startswith('label,length')
