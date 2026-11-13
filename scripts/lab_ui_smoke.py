@@ -35,125 +35,21 @@ def run(window):
       check(getComputedStyle($('normalizeEnabled').closest('section')).display==='none','Report exposes preprocessing');
       check(getComputedStyle($('preprocessingImage').closest('section')).display==='none','Report exposes processed preview');
       check(!$('labCalibrated').checked,'Pixel calibration should be the default');
-      // Sample control: native radios, Particles unless the user chose Tubes before.
-      let storedSample=null;try{storedSample=localStorage.getItem('labimage.sample')}catch{}
-      check($('labSample')?.querySelectorAll('input[type=radio][name=labSample]').length===2&&getComputedStyle($('labSample')).display!=='none','Sample control missing in Set up');
-      check(labSample===(storedSample==='tubes'?'tubes':'particles')&&$('labSample').querySelector('input[value='+labSample+']').checked,'Sample does not default to Particles');
       check($('labSavedDialog') instanceof HTMLDialogElement,'Saved dialog element missing');
-      labShowSaved(['C:/out/a(2).png','C:/out/a(3).png']);
+      labShowSaved(['C:/out/a(1).png','C:/out/a(2).png']);
       check($('labSavedDialog').open&&$('labSavedFolder').textContent==='C:/out'&&$('labSavedFiles').children.length===2,'Saved dialog does not list the folder and files');
       $('labSavedOk').click();check(!$('labSavedDialog').open,'Saved dialog OK does not close');
-      labSampleSet('tubes',false); // the checks below are the Tubes workspace: empty, Add tool
-      await $('runAnalysis').onclick();
-      check(Boolean(state),'Report workflow did not open editor: '+$('status').textContent);
-      check(state.candidates.length===0,'Report mode performed automatic analysis');
-      check(mode==='positive','Point tool is not the default');
-      await labPoint([90,100],1,false);
-      check(Boolean(preview?.choices.length),'Point inference failed: '+$('status').textContent);
-      check(state.candidates.length===0,'Report preview must wait for Apply');
-      await $('apply').onclick();
-      check(state.candidates.length===1,'Apply did not create the object: '+$('status').textContent);
-      let measured=await measurementSnapshot();
-      check(measured.candidates[0].length_um===null&&measured.candidates[0].width_um===null,'Unrequested automatic dimensions');
-      $('manualStyle').value='polyline';$('manualStart').click();
-      const clickPoint=p=>{
-        const r=canvas.getBoundingClientRect();
-        canvas.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,clientX:r.left+p[0]*r.width/canvas.width,clientY:r.top+p[1]*r.height/canvas.height}));
-      };
-      clickPoint([60,100]);clickPoint([90,70]);clickPoint([120,100]);
-      check(manualPoints.length===3,'Curve pointer input failed');
-      await $('manualSave').onclick();
-      $('manualAxis').value='width';$('manualStyle').value='line';$('manualStart').click();
-      clickPoint([90,80]);clickPoint([90,120]);
-      await $('manualSave').onclick();
-      measured=await measurementSnapshot();
-      check(Math.abs(measured.candidates[0].length_um-84.8528)<.02,'Curve was measured as a chord');
-      check(Math.abs(measured.candidates[0].width_um-40)<.02,'Manual W mismatch');
-      await $('manualAutomatic').onclick();
-      measured=await measurementSnapshot();
-      check(measured.candidates[0].length_um===null,'Clear measurements failed');
-      await accept(await api('undo',payload()));
-      measured=await measurementSnapshot();
-      check(measured.candidates[0].length_um>0,'Longitudinal measurement missing');
-      check(measured.candidates[0].width_um>0,'Transverse measurement missing');
-      await labRefreshOverlay();
-      check(Boolean(labMeasurementImage),'Yellow measurement overlay missing');
-      showPanel('analysis');
-      for(let n=0;n<200&&busy;n++)await new Promise(r=>setTimeout(r,100));
-      check(!$('analysisPanel').classList.contains('hidden'),'Report panel did not open');
-      check($('composedReportPreview').contentDocument?.body?.textContent.length>0,'Report preview is empty');
-      check(!(window.labErrors||[]).length,'JavaScript errors: '+JSON.stringify(window.labErrors));
-      showPanel('editor');
-      check(getComputedStyle(document.querySelector('[data-mode="polygon"]')).display!=='none','Polygon is hidden');
-      document.querySelector('[data-mode="box"]').click();
-      box=[175,50,275,165];draw();controls();
-      document.querySelector('[data-mode="prompt-positive"]').click();
-      check(Boolean(box),'Point + cleared the box');
-      clickPoint([220,100]);
-      document.querySelector('[data-mode="negative"]').click();clickPoint([177,53]);
-      check(Boolean(box)&&labels.join(',')==='1,0','Box include/exclude prompts were lost');
-      await $('predict').onclick();
-      check(preview?.choices.length&&queuedRegions[0].input.labels.join(',')==='1,0','Box plus points preview failed');
-      document.querySelector('[data-mode="prompt-positive"]').click();clickPoint([230,110]);
-      check(queuedRegions[0].input.points.length===3,'Queued box point correction was lost');
-      check(!$('updateRegionPreview').classList.contains('hidden'),'Update Preview missing for Point +');
-      await $('updateRegionPreview').onclick();
-      check(Boolean(preview?.choices.length),'Refined box preview missing');
-      const boxCount=state.candidates.length;await $('apply').onclick();
-      check(state.candidates.length===boxCount+1,'Box plus points Apply failed');
-      document.querySelector('[data-mode="polygon"]').click();
-      clickPoint([200,180]);clickPoint([230,180]);clickPoint([230,210]);
-      await $('predict').onclick();
-      check(Boolean(preview?.choices.length),'Polygon preview missing');
-      const polygonCount=state.candidates.length;await $('apply').onclick();
-      check(state.candidates.length===polygonCount+1,'Polygon Apply failed');
-      document.querySelector('[data-mode="tube"]').click();
-      check(mode==='tube','Tube tool did not open');
-      tubeLineSet('auto');
-      check(/Click one end/.test($('tsSteps').textContent),'Tube strip does not teach clicking both ends');
-      check(!$('tubeHint')&&getComputedStyle($('tubeLine')).display!=='none'&&/Click/.test($('tubeLine').title),'Tubes panel must not carry a help paragraph; Line help belongs in the control tooltip');
-      lookChecks();
-      const tubeCalls=[],realApi=api;
-      api=(route,data)=>{tubeCalls.push([route,data]);return realApi(route,data)};
+      const realApi=api;
       const drag=(type,p,button=0)=>{
         const r=canvas.getBoundingClientRect();
         canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,pointerId:9,button,buttons:type==='pointerup'?0:button===2?2:1,clientX:r.left+p[0]*r.width/canvas.width,clientY:r.top+p[1]*r.height/canvas.height}));
       };
-      try{
-        // A left drag traces nothing any more: only clicks place points.
-        const before=tubeCalls.length;
-        drag('pointerdown',[60,100]);for(const x of [75,90,105])drag('pointermove',[x,100]);drag('pointerup',[120,100]);
-        check(tubeCalls.length===before&&!tubeCalls.some(([r,d])=>d?.stroke===true),'A left drag sent a stroke');
-        tubeCancel();
-        // Manual line: every click is a vertex; clicking the last point again saves it as drawn.
-        tubeLineSet('manual');
-        check(/Click along the tube/.test($('tsSteps').textContent),'Manual line steps missing');
-        for(const p of [[60,100],[90,110],[120,100],[120,100]]){drag('pointerdown',p);drag('pointerup',p)}
-        for(let n=0;n<300&&busy;n++)await new Promise(r=>setTimeout(r,100));
-        check(tubeCalls.some(([r,d])=>r==='trace-tube'&&d.manual===true&&d.points.length===3),'Manual line was not sent as 3 clicked points');
-        // Width only + Manual: a drag draws the first edge on release, a click on the other edge sends both.
-        tubeKindSet('d');
-        drag('pointerdown',[60,160]);drag('pointermove',[100,160]);drag('pointerup',[140,160]);
-        check(tube.trace.length===2,'Edge drag did not draw the first line');
-        drag('pointerdown',[100,175]);drag('pointerup',[100,175]);
-        for(let n=0;n<300&&busy;n++)await new Promise(r=>setTimeout(r,100));
-        check(tubeCalls.some(([r,d])=>r==='measure-tube'&&Array.isArray(d.edge)&&d.edge.length===2&&Array.isArray(d.point)),'Edge width was not sent');
-        tubeKindSet('td');tubeLineSet('auto');
-        const sent=tubeCalls.length;
-        drag('pointerdown',[200,100],2);drag('pointerup',[200,100],2);
-        check(tubeCalls.length===sent,'Right click without a drag sent a request');
-        drag('pointerdown',[180,70],2);drag('pointermove',[260,140],2);drag('pointerup',[260,140],2);
-        for(let n=0;n<300&&busy;n++)await new Promise(r=>setTimeout(r,100));
-        check(tubeCalls.some(([r,d])=>r==='measure-tube'&&Array.isArray(d.box)&&d.box.length===4),'Right-drag box did not send a box');
-      }finally{api=realApi}
       // Particles: Set up -> automatic Detect particles -> Select particles (two panes) -> Edit lines (one pane).
       // The synthetic image may make the backend answer 400, so mostly the requests are checked.
       const particleCalls=[],idle=async(n=300)=>{for(let i=0;i<n&&busy;i++)await new Promise(r=>setTimeout(r,100))};
       window.labParticleReplies=[]; // what the backend answered, for the smoke report
       api=(route,data)=>{particleCalls.push([route,data]);return realApi(route,data).then(r=>{window.labParticleReplies.push(route+': ok');return r},e=>{window.labParticleReplies.push(route+': '+e.message);throw e})};
       try{
-        await prepareExisting(state.dataset);
-        labSampleSet('particles',false);
         check($('runAnalysis').textContent==='Detect particles','Run button does not say Detect particles');
         await $('runAnalysis').onclick();await idle(900);
         check(particleCalls.some(([r])=>r==='detect-particles'),'Analysis in Particles mode did not send detect-particles: '+$('status').textContent);
@@ -207,6 +103,12 @@ def run(window):
         check($('poreDetailsTitle').textContent==='Particle Details'&&/Source/.test($('poreTable').querySelector('thead').textContent),'Details is not the Particle Details table');
         window.renderPoreDetails(await measurementSnapshot());
       }finally{api=realApi}
+      showPanel('analysis');
+      for(let n=0;n<200&&busy;n++)await new Promise(r=>setTimeout(r,100));
+      check(!$('analysisPanel').classList.contains('hidden'),'Report panel did not open');
+      check($('composedReportPreview').contentDocument?.body?.textContent.length>0,'Report preview is empty');
+      check(!(window.labErrors||[]).length,'JavaScript errors: '+JSON.stringify(window.labErrors));
+      check(!document.querySelector('[data-mode="tube"]')&&!$('labSample'),'Tube traces left in Report');
       await labChoose('labeling');
       lookChecks();
       check(document.querySelector('#tools [data-mode=select] svg'),'Icon rail missing');
@@ -245,7 +147,7 @@ def run(window):
       check(state.candidates.length===countBeforeDelete,'Undo click delete failed');
       hotkey('KeyS');
       check(!(window.labErrors||[]).length,'JavaScript errors after labeling: '+JSON.stringify(window.labErrors));
-      window.labQaResult={passed:true,english_default:true,report_preprocessing_hidden:true,manual_curve_input:true,object_path_endpoints:true,mode_chooser:true,point_default:true,report_no_automatic_masks:true,point_preview_apply:true,measurement_overlay:true,report_preview:true,labeling_report_hidden:true,labeling_automatic_and_immediate_points:true,negative_point_refinement:true,tube_manual_line_and_box:true,sample_control:true,particle_multiselect_delete:true,particle_auto_detect:true,particle_select_two_panes:true,particle_edit_lines:true,particle_line_delete:true,saved_dialog:true,particle_replies:window.labParticleReplies||[],javascript_errors:window.labErrors||[]};
+      window.labQaResult={passed:true,english_default:true,report_preprocessing_hidden:true,mode_chooser:true,report_preview:true,no_tube:true,labeling_report_hidden:true,labeling_automatic_and_immediate_points:true,negative_point_refinement:true,particle_multiselect_delete:true,particle_auto_detect:true,particle_select_two_panes:true,particle_edit_lines:true,particle_line_delete:true,saved_dialog:true,particle_replies:window.labParticleReplies||[],javascript_errors:window.labErrors||[]};
     })().catch(e=>{window.labQaResult={passed:false,error:e.message,stack:e.stack,javascript_errors:window.labErrors||[]}});
     '''.replace('CONTENT',json.dumps(content))
     window.evaluate_js(script)

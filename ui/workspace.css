@@ -57,6 +57,13 @@ header .steps{order:2}
 .image-library>.hint:first-child{margin-top:0}
 .image-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--sp-5)}
 .image-cards>.hint,.library-empty{grid-column:1/-1}
+/* Open analysis: one group per source folder */
+.library-folders{display:grid;gap:var(--sp-4)}
+.library-folder>summary{display:flex;align-items:center;gap:var(--sp-3);min-width:0;padding:var(--sp-2) 0;cursor:pointer}
+.library-folder>summary strong{font-size:var(--fs-14);font-weight:var(--fw-semibold)}
+.library-folder .chip-count{display:inline-flex;align-items:center;font-size:var(--fs-12)}
+.library-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-3);font:var(--fs-12) var(--font-mono)}
+.library-folder>.image-cards{margin-top:var(--sp-3)}
 .library-empty{display:flex;flex-direction:column;align-items:flex-start;gap:var(--sp-2);padding:var(--sp-6) 0}
 .library-empty .hint{margin:0;font-size:var(--fs-13);color:var(--text-2)}
 .image-card{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:var(--sp-3);min-width:0;padding:var(--sp-4);
@@ -158,9 +165,6 @@ header .steps{order:2}
 :root{--check:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d6b45' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")}
 #toolStrip .ts-keys{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:0 var(--sp-5);flex:1 1 0;min-width:0;height:22px;overflow:hidden;margin:0;font-size:var(--fs-12);color:var(--text-3)} /* keys that do not fit wrap to a clipped second line, whole */
 #toolStrip .ts-keys span{display:inline-flex;align-items:center;gap:var(--sp-2);white-space:nowrap}
-#toolStrip .ts-count{font-family:var(--font-mono);font-weight:var(--fw-semibold);color:var(--text)}
-#toolStrip #tubeKind{flex:none;order:2;margin-left:auto}
-body:not([data-tool=tube]) #tubeKind{display:none}
 /* Particle stages (docs/ui-design.md "Particle workflow"): Select particles = Detect, Remove, Next; Edit lines = Select|Draw, Length|Width (Draw only), Remove, Build report.
    Compact so the worst case fits one 40 px row at 1000 px: the canvas never moves when a button appears. */
 body[data-tool=particle] #toolStrip{gap:var(--sp-4)}
@@ -171,7 +175,7 @@ body[data-tool=particle] #tsName,#toolStrip :is(#particleEdit,#particleAxis) leg
 body:not([data-tool=particle]) :is(#particleEdit,#particleAxis,#particleWidthMode,#particleDetect,#particleDetails,#particleRemove,#particleNext,.particle-only){display:none}
 #particleRemove[hidden]{display:none}
 body:not([data-particle-stage=select]) :is(#particleDetect,#particleDetails),body:not([data-particle-stage=lines]) :is(#particleEdit,#particleAxis,#particleWidthMode),body:not([data-particle-edit=draw]) #particleAxis,body[data-particle-edit=draw] #particleWidthMode{display:none} /* Draw shows the axis radios instead: both do not fit a narrow window */
-body[data-tool=particle] :is(.tube-only,#tubeLine,#tubeEmpty,#manualPanel){display:none} /* one results panel; its copy follows the tool */
+body[data-tool=particle] #manualPanel{display:none} /* one results panel; its copy follows the tool */
 #toolStrip .ts-stage{gap:var(--sp-3);min-height:var(--ctl-h-sm);margin:0 calc(-1 * var(--sp-3));padding:0 var(--sp-3);border-color:transparent;background:transparent;color:inherit;font:inherit}
 #toolStrip .ts-stage:hover:not(:disabled){background:var(--surface-hover);color:var(--text)}
 #toolStrip .ts-stage:hover:not(:disabled) .ts-label{text-decoration:underline;text-underline-offset:2px}
@@ -200,11 +204,11 @@ canvas#image:focus-visible{outline:2px solid var(--focus-on-well);outline-offset
 #originalImage{display:block}
 .comparison-cursor-overlay{position:absolute;overflow:hidden;pointer-events:none;z-index:2}
 .comparison-cursor{display:block;position:absolute;left:0;top:0;filter:drop-shadow(0 0 1px #fff)}
-body:is([data-tool=tube],[data-tool=particle]) .comparison-viewports{grid-template-columns:minmax(0,1fr)}
-body:is([data-tool=tube],[data-tool=particle]) .comparison-pane:first-child{display:none}
+body[data-tool=particle] .comparison-viewports{grid-template-columns:minmax(0,1fr)}
+body[data-tool=particle] .comparison-pane:first-child{display:none}
 body[data-tool=particle][data-particle-stage=select] .comparison-viewports{grid-template-columns:minmax(0,1fr) minmax(0,1fr)} /* Select particles: raw image left, selected particles right */
 body[data-tool=particle][data-particle-stage=select] .comparison-pane:first-child{display:flex}
-body:is([data-tool=tube],[data-tool=particle]) :is(.legend,#editorPanel>aside>.panel:has(.metric),.lab-controls,#regionPanel,#previewPanel){display:none}
+body[data-tool=particle] :is(.legend,#editorPanel>aside>.panel:has(.metric),.lab-controls,#regionPanel,#previewPanel){display:none}
 
 /* ---- legend, overlap notice ---- */
 .legend{display:flex;align-items:center;flex-wrap:wrap;gap:0 var(--sp-5);height:24px;padding:0 var(--sp-5);font-size:var(--fs-12);color:var(--text-3);background:var(--surface-app)}
@@ -231,7 +235,7 @@ body.is-busy #status::after{content:"";position:absolute;left:0;top:-1px;height:
 #editorPanel>aside .hint{margin:var(--sp-3) 0}
 #editorPanel>aside select{width:100%;min-width:0}
 #editorPanel>aside .row{flex-wrap:wrap}
-#tubePanel{order:1}
+#resultPanel{order:1}
 .lab-controls{order:2}
 #regionPanel{order:3}
 #previewPanel{order:4}
@@ -294,22 +298,21 @@ body.is-busy #status::after{content:"";position:absolute;left:0;top:-1px;height:
 #labMeasurementSettings>label{display:flex}
 #labMeasurementSettings .field{margin-top:var(--sp-4)}
 
-/* ---- Tubes readout (5.6, the signature element) ---- */
-#tubePanel .panel-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);margin-bottom:var(--sp-4)}
-#tubePanel .panel-head h2{display:flex;align-items:center;gap:var(--sp-3);margin:0}
-#tubeCount{display:inline-flex;align-items:center;font:var(--fw-semibold) var(--fs-12)/1 var(--font-mono);background:var(--surface-sunken);color:var(--text);border-radius:var(--r-pill);padding:0 var(--sp-3);height:18px}
-#tubeCount:empty,#tubeCount[data-n="0"]{display:none}
-#tubeStatus{margin:0 0 var(--sp-4)}
-#tubeStatus:empty{display:none}
+/* ---- Particles readout ---- */
+#resultPanel .panel-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);margin-bottom:var(--sp-4)}
+#resultPanel .panel-head h2{display:flex;align-items:center;gap:var(--sp-3);margin:0}
+#resultCount{display:inline-flex;align-items:center;font:var(--fw-semibold) var(--fs-12)/1 var(--font-mono);background:var(--surface-sunken);color:var(--text);border-radius:var(--r-pill);padding:0 var(--sp-3);height:18px}
+#resultCount:empty,#resultCount[data-n="0"]{display:none}
+#resultStatus{margin:0 0 var(--sp-4)}
+#resultStatus:empty{display:none}
 #particleModeHint{margin:0 0 var(--sp-4)}
-#tubeStatus:not(.error){display:none} /* trace progress is in the strip; the inspector shows errors only */
-#tubeCalib{justify-content:flex-start;width:100%;min-height:var(--ctl-h);margin:0 0 var(--sp-4);border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-12);white-space:normal;text-align:left}
-#tubeCalib:hover:not(:disabled){background:color-mix(in srgb,var(--warn-soft) 70%,var(--warn) 12%);border-color:var(--warn)}
-#tubePanel .empty{display:grid;justify-items:start;gap:var(--sp-4);padding:var(--sp-6) 0 var(--sp-2)}
-#tubePanel .empty>svg{width:32px;height:32px;stroke:var(--text-3);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-#tubePanel .empty p{color:var(--text-2);max-width:36ch}
-#tubePanel .empty strong{display:block;margin-bottom:var(--sp-1);color:var(--text);font-size:var(--fs-13)}
-#tubeStart kbd{margin-left:var(--sp-2)}
+#resultStatus:not(.error){display:none} /* the inspector shows errors only */
+#resultCalib{justify-content:flex-start;width:100%;min-height:var(--ctl-h);margin:0 0 var(--sp-4);border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:var(--warn-soft);color:var(--warn);font-size:var(--fs-12);white-space:normal;text-align:left}
+#resultCalib:hover:not(:disabled){background:color-mix(in srgb,var(--warn-soft) 70%,var(--warn) 12%);border-color:var(--warn)}
+#resultPanel .empty{display:grid;justify-items:start;gap:var(--sp-4);padding:var(--sp-6) 0 var(--sp-2)}
+#resultPanel .empty>svg{width:32px;height:32px;stroke:var(--text-3);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+#resultPanel .empty p{color:var(--text-2);max-width:36ch}
+#resultPanel .empty strong{display:block;margin-bottom:var(--sp-1);color:var(--text);font-size:var(--fs-13)}
 .results-wrap{max-height:320px}
 .results{font-size:var(--fs-13)}
 .results th .chip-measure{margin-right:var(--sp-2);height:18px;padding:0 var(--sp-2);font-size:var(--fs-11)}
@@ -535,8 +538,6 @@ body.report-panel-dragging .report-new-row{display:block}
 #labSavedTitle .saved-icon{width:20px;height:20px;stroke:var(--ok);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .saved-folder{margin-block:var(--sp-2) var(--sp-4);font-family:var(--font-mono);font-size:var(--fs-12);color:var(--text);overflow-wrap:anywhere;user-select:text}
 .saved-files{margin-block:0;padding-left:var(--sp-6);font-family:var(--font-mono);font-size:var(--fs-12);line-height:1.7;color:var(--text);overflow-wrap:anywhere;user-select:text}
-#labSample{justify-self:start}
-#labSampleHint{margin:0}
 
 /* columns dialog */
 #poreColumnsDialog{width:min(640px,calc(100vw - 32px));overflow:auto}
@@ -567,15 +568,15 @@ body.report-panel-dragging .report-new-row{display:block}
   #tools button{height:56px}
 }
 @media (max-width:1599px){
-  body:is([data-tool=tube],[data-tool=particle]) #toolStrip .ts-keys span:not(.ts-count){display:none} /* the panel hint lists the keys */
+  body[data-tool=particle] #toolStrip .ts-keys span{display:none} /* the panel hint lists the keys */
   body[data-tool=particle] #toolStrip .ts-keys{display:none} /* empty for particles; drop its gap too */
 }
 @media (max-width:1439px){
-  /* Tube steps: number circles, plus the label of the current step only */
+  /* Stage steps: number circles, plus the label of the current step only */
   #toolStrip .ts-steps li:not(.now) .ts-label,#toolStrip .ts-steps small{display:none}
 }
 @media (min-width:1280px){
-  /* Idle Tube: the two gestures are alternatives, not a sequence; keep both labels so right-drag is taught */
+  /* Particle stages: keep both labels; the other stage is a button */
   #toolStrip .ts-steps.idle li .ts-label{display:inline}
 }
 @media (max-width:1279px){

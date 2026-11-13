@@ -36,3 +36,5 @@ body:not(.lab-advanced) [data-mode="ellipse"],body:not(.lab-advanced) [data-mode
   .lab-home-inner{padding:var(--sp-9) var(--sp-6)}
   .lab-mode-cards>button{min-height:0}
 }
+#labBatchSetup{align-items:flex-end}
+#labBatchDialog .results-wrap[hidden]{display:none}

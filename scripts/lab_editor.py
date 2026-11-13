@@ -11,26 +11,11 @@ from lab_geometry import geometry, measured_overlay
 from result_paths import replace_file
 
 
-TUBE_KINDS = ('td', 't', 'd')   # length + width, length only, width only
-
-
-def tube_annotation(c, kind='td'):
-    from cnt_detect import VERSION
-    measurements, methods = {}, {}
-    if 't' in kind: measurements['length'], methods['length'] = c['path'].tolist(), 'auto_centerline'
-    if 'd' in kind and c['width_px'] is not None: measurements['width'], methods['width'] = c['width_line'], 'manual_width' if c.get('width_edges') else 'auto_width'
-    extra = dict(width_edges=c['width_edges']) if 'd' in kind and c.get('width_edges') else {}
-    return dict(**extra, source={'trace': 'cnt_trace', 'manual': 'cnt_manual', 'sam': 'prompted_sam', 'spot': 'cnt_spot'}[c['source']], supplemental=True,
-        review_status='user_accepted', manual_measurements=measurements, measurement_methods=methods,
-        tube=dict(version=VERSION, kind=kind, candidate_source=c['source'], learned=bool(c.get('learned')), width_stations=c['width_stations'] if 'd' in kind else [],
-                  width_station=c['width_station'] if 'd' in kind else None))
-
-
 WIDTH_METHODS = dict(min='auto_feret_min', perpendicular='auto_feret_perpendicular')
 
 
 def particle_annotation(measure, source, features=None, warning=None, width='min'):
-    """Maximum Feret length + minimum Feret width of one flake; the lines feed the same table/CSV path as a tube's manual lines."""
+    """Maximum Feret length + minimum Feret width of one flake; the lines feed the measurement table and CSVs."""
     lines = dict(length=measure.get('length_line'), width=measure.get('width_line'))
     present = {k: v for k, v in lines.items() if v is not None}
     return dict(source=f'particle_{source}', supplemental=True, review_status='user_accepted', manual_measurements=present,
@@ -38,6 +23,14 @@ def particle_annotation(measure, source, features=None, warning=None, width='min
         particle=dict(length_line=lines['length'], width_line=lines['width'], length_px=measure.get('length_px'), width_px=measure.get('width_px'),
                       width_caliper_px=measure.get('width_caliper_px'), width_chord_px=measure.get('width_chord_px'), width_touch=measure.get('width_touch'),
                       source=source, features=features or {}, warning=warning))
+
+
+def line_mask(shape, line, width):
+    """Pixels under a straight line `width` px wide: the mask of a particle that is only a hand-drawn line."""
+    import cv2
+    mask = np.zeros(shape, np.uint8)
+    cv2.polylines(mask, [np.rint(line).astype(np.int32)], False, 1, width)
+    return mask.astype(bool)
 
 
 def image_scale(state):
@@ -173,161 +166,6 @@ class LabEditor(Editor):
         return self.save(state, dict(state['masks']), annotations, history, state['next_id'],
             dict(type='manual-measurement', object_id=identifier, axis=axis))
 
-    def tube_ridge(self, state):
-        if state['report'].get('workspace_mode') != 'report':
-            raise ValueError('Tubes are available in report mode.')
-        if 'tube_cache' not in state:  # gray never changes within a dataset, so this survives revisions and undo
-            from cnt_detect import centerline_map, ridge_response
-            state['tube_cache'] = ridge_response(state['gray'], image_scale(state),
-                state['report'].get('measurement_unit', 'µm') != 'px')
-            state['tube_cache']['P'] = centerline_map(state['gray'])  # None without the model file
-        return state['tube_cache']
-
-    def tube_values(self, state, c, kind='td'):
-        """What the user sees for one tube; nested under `tube` in the response so it cannot clobber image fields."""
-        ump = state['report']['scale']['um_per_pixel']
-        width = float(np.linalg.norm(np.diff(c['width_line'], axis=0))) if 'd' in kind and c['width_line'] else None  # what the table and CSV report
-        length = c['length_px'] if 't' in kind else None
-        station = c['width_station'] if width is not None else None
-        return dict(kind=kind, length_px=length, width_px=width, length=None if length is None else length*ump,
-            width=None if width is None else width*ump, unit=state['report'].get('measurement_unit', 'µm'),
-            clean=None if station is None else station['clean'])
-
-    def trace_tube(self, state, payload):
-        """Trace the ridge through the clicked points (or under a freehand stroke, or measure D at one click) and save one measured object."""
-        from cnt_detect import STROKE_MAX_POINTS, manual_line, measure_spot, trace_stroke, trace_tube
-        ridge = self.tube_ridge(state)
-        kind, points = payload.get('kind', 'td'), payload.get('points')
-        if kind not in TUBE_KINDS: raise ValueError('Invalid tube kind.')
-        if payload.get('stroke') is True:
-            if kind == 'd': raise ValueError('A stroke measures length: use kind td or t.')
-            if not isinstance(points, list) or not 2 <= len(points) <= STROKE_MAX_POINTS: raise ValueError(f'A stroke needs 2 to {STROKE_MAX_POINTS} points.')
-            c = trace_stroke(state['gray'], ridge, points)   # the stroke may run past the border: it is clipped to the image
-            if payload.get('preview') is True:   # live preview while dragging: nothing is saved
-                return dict(preview=True, path=np.round(c['path'], 1).tolist())
-            return self.add_tube(state, c, kind)
-        if payload.get('manual') is True:   # the user's own polyline, saved as drawn
-            if kind == 'd': raise ValueError('A line measures length: use kind td or t.')
-            return self.add_tube(state, manual_line(state['gray'], ridge, points), kind)
-        if kind == 'd':
-            if not isinstance(points, list) or len(points) != 1: raise ValueError('Width only needs one click on the tube.')
-        elif not isinstance(points, list) or not 2 <= len(points) <= 20:
-            raise ValueError('Trace needs 2 to 20 points inside the image.')
-        self.coords(points, state['gray'].shape)
-        c = measure_spot(state['gray'], ridge, points[0]) if kind == 'd' else trace_tube(state['gray'], ridge, points)
-        return self.add_tube(state, c, kind)
-
-    def add_tube(self, state, c, kind):
-        """Save a traced / measured candidate as one new tube object."""
-        from cnt_detect import tube_mask
-        occupied = np.zeros(state['gray'].shape, bool)
-        for m in state['masks'].values(): occupied |= m
-        # Pre-carving keeps masks exclusive; length and width were measured on the whole tube.
-        full = tube_mask(state['gray'].shape, c['path'], c['band_px'])
-        mask = full & ~occupied
-        if mask.sum() < 20:
-            # Name the object that covers the trace, labelled as the list and figure label it (T#, D# or #).
-            hit = max(state['masks'], key=lambda i: int((state['masks'][i] & full).sum()), default=None)
-            kind_ = (state['annotations'].get(str(hit)) or {}).get('tube', {}).get('kind')
-            raise ValueError('This tube is already measured.' if hit is None else
-                f"{'D' if kind_ == 'd' else 'T' if kind_ else '#'}{hit} is already measured.")
-        identifier = state['next_id']
-        annotations = copy.deepcopy(state['annotations'])
-        annotations[str(identifier)] = tube_annotation(c, kind)
-        result = self.save(state, {**state['masks'], identifier: mask}, annotations,
-            list(state['history'])+[state['revision']], identifier+1, dict(type='trace-tube', object_id=identifier, kind=kind))
-        result.update(object_id=identifier, tube=self.tube_values(state, c, kind))
-        return result
-
-    def measure_box(self, state, payload):
-        """D inside a dragged box. Where the box crosses the centerline of an existing object, D is measured on the part of that
-        path inside the box and replaces the object's D (a length-only tube becomes length + width); otherwise a new width-only
-        object is measured at the box. A width-only object whose mark lies in the box has its D replaced too."""
-        from cnt_detect import box_piece, box_width, clean_box, measure_spot
-        ridge = self.tube_ridge(state)
-        box = clean_box(payload.get('box'), state['gray'].shape)
-        centre = np.array([(box[0]+box[2])/2, (box[1]+box[3])/2])
-        hits, marks = [], []
-        for identifier in state['masks']:
-            paths = (state['annotations'].get(str(identifier)) or {}).get('manual_measurements') or {}
-            if len(paths.get('length', [])) > 1:
-                piece = box_piece(paths['length'], box)
-                if piece is not None: hits.append((len(piece), identifier, piece))
-            elif len(paths.get('width', [])) > 1:
-                mid = np.mean(np.asarray(paths['width'], float), axis=0)
-                if box[0] <= mid[0] <= box[2] and box[1] <= mid[1] <= box[3]: marks.append((float(np.linalg.norm(mid-centre)), identifier))
-        if not hits and not marks:
-            return dict(self.add_tube(state, measure_spot(state['gray'], ridge, centre, box), 'd'), replaced=False)
-        if hits:
-            _, identifier, piece = max(hits)
-            m = box_width(state['gray'], ridge, piece, box)
-        else:
-            _, identifier = min(marks)
-            m = measure_spot(state['gray'], ridge, centre, box)
-        annotations = copy.deepcopy(state['annotations'])
-        annotation = annotations[str(identifier)]
-        annotation.pop('width_edges', None)   # an automatic D replaces a hand-drawn one
-        measured = annotation.setdefault('manual_measurements', {})
-        measured['width'] = m['width_line']
-        annotation.setdefault('measurement_methods', {})['width'] = 'auto_width'
-        length = np.asarray(measured.get('length', []), float)
-        kind = 'td' if len(length) > 1 else 'd'
-        if 'tube' in annotation: annotation['tube'].update(kind=kind, width_stations=m['width_stations'], width_station=m['width_station'])
-        result = self.save(state, dict(state['masks']), annotations, list(state['history'])+[state['revision']], state['next_id'],
-            dict(type='box-width', object_id=identifier))
-        c = dict(width_line=m['width_line'], width_station=m['width_station'], length_px=float(np.linalg.norm(np.diff(length, axis=0), axis=1).sum()) if kind == 'td' else None)
-        result.update(object_id=identifier, replaced=True, tube=self.tube_values(state, c, kind))
-        return result
-
-    def measure_edges(self, state, payload):
-        """D from two parallel lines (hand-label style): `edge` is the user's line along one side of the tube, `point` a click on
-        the other side. D is their perpendicular distance. Where the strip between the lines crosses an object's length path,
-        that object's D is replaced; otherwise a new width-only object is made."""
-        import cv2
-        edge, point = payload.get('edge'), payload.get('point')
-        if not isinstance(edge, list) or len(edge) != 2 or not isinstance(point, list): raise ValueError('Draw one edge line, then click the other side.')
-        a0, a1 = np.asarray(self.coords(edge, state['gray'].shape), float)
-        p = np.asarray(self.coords([point], state['gray'].shape), float)[0]
-        span = float(np.linalg.norm(a1-a0))
-        if span < 2: raise ValueError('Draw a longer edge line.')
-        u = (a1-a0)/span; n = np.array([-u[1], u[0]])
-        d = float((p-a0)@n)
-        if abs(d) < 1: raise ValueError('Click the other side of the tube.')
-        b0, b1 = a0+d*n, a1+d*n
-        mid = (a0+a1)/2
-        width_line = [mid.tolist(), (mid+d*n).tolist()]
-        edges = [[a0.tolist(), a1.tolist()], [b0.tolist(), b1.tolist()]]
-        strip = np.zeros(state['gray'].shape, np.uint8)
-        cv2.fillPoly(strip, [np.rint([a0, a1, b1, b0]).astype(np.int32)], 1)
-        hits = []
-        for identifier in state['masks']:
-            annotation = state['annotations'].get(str(identifier)) or {}
-            paths = annotation.get('manual_measurements') or {}
-            if len(paths.get('length', [])) > 1:
-                from cnt_detect import resample
-                q = np.rint(resample(paths['length'])).astype(int)
-                q = q[(q[:, 0] >= 0) & (q[:, 1] >= 0) & (q[:, 0] < strip.shape[1]) & (q[:, 1] < strip.shape[0])]
-                inside = int(strip[q[:, 1], q[:, 0]].sum()) if len(q) else 0
-                if inside: hits.append((inside, identifier))
-        if not hits:
-            c = dict(source='manual', path=np.array([(a0+b0)/2, (a1+b1)/2]), band_px=abs(d), width_px=abs(d), width_line=width_line,
-                     width_edges=edges, width_stations=[], width_station=None, length_px=span)
-            return dict(self.add_tube(state, c, 'd'), replaced=False)
-        identifier = max(hits)[1]
-        annotations = copy.deepcopy(state['annotations'])
-        annotation = annotations[str(identifier)]
-        measured = annotation.setdefault('manual_measurements', {})
-        measured['width'] = width_line
-        annotation['width_edges'] = edges
-        annotation.setdefault('measurement_methods', {})['width'] = 'manual_width'
-        length = np.asarray(measured.get('length', []), float)
-        if 'tube' in annotation: annotation['tube'].update(kind='td', width_stations=[], width_station=None)
-        result = self.save(state, dict(state['masks']), annotations, list(state['history'])+[state['revision']], state['next_id'],
-            dict(type='edge-width', object_id=identifier))
-        c = dict(width_line=width_line, width_station=None, length_px=float(np.linalg.norm(np.diff(length, axis=0), axis=1).sum()))
-        result.update(object_id=identifier, replaced=True, tube=self.tube_values(state, c, 'td'))
-        return result
-
     def particle_values(self, state, p):
         """What the user sees for one particle, in the report unit; nested under `particle` in the response."""
         ump = state['report']['scale']['um_per_pixel']
@@ -342,6 +180,12 @@ class LabEditor(Editor):
         """The image scale for detection sizes (without the correction factor)."""
         if state['report'].get('workspace_mode') != 'report': raise ValueError('Particles are available in report mode.')
         return image_scale(state)
+
+    def drawn_mask(self, state, identifier, annotation):
+        """Mask of a particle made only of hand-drawn lines: the pixels under its lines that no other object holds."""
+        mask = np.zeros(state['gray'].shape, bool)
+        for line in annotation['manual_measurements'].values(): mask |= line_mask(mask.shape, np.asarray(line, float), 3)
+        return self.free_mask(dict(masks={i: m for i, m in state['masks'].items() if i != identifier}), mask)
 
     def free_mask(self, state, mask):
         occupied = np.zeros(mask.shape, bool)
@@ -423,7 +267,6 @@ class LabEditor(Editor):
     def particle_line(self, state, payload):
         """A hand-drawn straight line. It belongs to the particle holding its midpoint, else to the one whose other-axis line it crosses, else to a new object.
         `points: null` with `object_id` removes that axis line instead (the object and its mask stay)."""
-        from cnt_detect import tube_mask
         self.particle_mode(state)
         axis, points, identifier = payload.get('axis'), payload.get('points'), payload.get('object_id')
         if axis not in ('length', 'width'): raise ValueError('Choose L or W.')
@@ -434,9 +277,14 @@ class LabEditor(Editor):
             if axis not in annotation['manual_measurements']: raise ValueError(f'This particle has no {axis} line.')
             del annotation['manual_measurements'][axis]; annotation['measurement_methods'].pop(axis, None)
             annotation['particle'].update({f'{axis}_line': None, f'{axis}_px': None})
-            result = self.save(state, dict(state['masks']), annotations, list(state['history'])+[state['revision']], state['next_id'],
+            masks, removed = dict(state['masks']), False
+            if annotation['particle'].get('source') == 'manual':   # a particle made of hand-drawn lines only: its mask follows the lines left
+                mask = self.drawn_mask(state, identifier, annotation)
+                if mask.any(): masks[identifier] = mask
+                else: del masks[identifier], annotations[str(identifier)]; removed = True   # no line left: nothing left of it
+            result = self.save(state, masks, annotations, list(state['history'])+[state['revision']], state['next_id'],
                 dict(type='particle-line-remove', object_id=identifier, axis=axis))
-            result.update(object_id=identifier, created=False, particle=self.particle_values(state, annotation['particle']))
+            result.update(object_id=identifier, created=False, removed=removed, particle=self.particle_values(state, annotation['particle']))
             return result
         if not isinstance(points, list) or len(points) != 2: raise ValueError('Draw one straight line with two points.')
         line = np.asarray(points, dtype=float)
@@ -456,7 +304,7 @@ class LabEditor(Editor):
             identifier = min(crossed)[1] if crossed else None
         created, length = identifier is None, float(np.linalg.norm(line[1]-line[0]))
         if created:
-            mask = self.free_mask(state, tube_mask(state['gray'].shape, line, 3))
+            mask = self.free_mask(state, line_mask(state['gray'].shape, line, 3))
             if mask.sum() < 20: raise ValueError('Draw the line on free background, outside the measured objects.')
             result, ids = self.add_particles(state, [(mask, particle_annotation({f'{axis}_line': line.tolist(), f'{axis}_px': length}, 'manual'))], 'particle-line')
             identifier = ids[0]
@@ -466,7 +314,9 @@ class LabEditor(Editor):
             annotation['manual_measurements'][axis] = line.tolist()
             annotation.setdefault('measurement_methods', {})[axis] = 'manual_line'
             annotation['particle'].update({f'{axis}_line': line.tolist(), f'{axis}_px': length})
-            result = self.save(state, dict(state['masks']), annotations, list(state['history'])+[state['revision']], state['next_id'],
+            masks = dict(state['masks'])
+            if annotation['particle'].get('source') == 'manual' and (mask := self.drawn_mask(state, identifier, annotation)).any(): masks[identifier] = mask
+            result = self.save(state, masks, annotations, list(state['history'])+[state['revision']], state['next_id'],
                 dict(type='particle-line', object_id=identifier, axis=axis))
         result.update(object_id=identifier, created=created, particle=self.particle_values(state, state['annotations'][str(identifier)]['particle']))
         return result
@@ -481,27 +331,25 @@ class LabEditor(Editor):
         return figure
 
     def save_labels(self, state, payload):
-        """Hand-label figures beside the original: <name>(2) with lengths (T#) only, <name>(3) with widths (D#) only; particles: plain values, label = object id.
-        Particles also get <name>(1): the minimum Feret widths. Their <name>(3) is the width perpendicular to the length. Both are saved whatever the Width toggle shows."""
-        if not any('tube' in a or 'particle' in a for a in state['annotations'].values()): return dict(no_tubes=True)
+        """Particle figures beside the original, plain values labelled with the object id: <name>(1) minimum Feret widths and <name>(2) lengths,
+        each with a CSV. (1) is the minimum width whatever the Width toggle shows."""
+        if not any('particle' in a for a in state['annotations'].values()): raise ValueError('Measure particles first.')
         source = self.source_path(state)
         folder = payload.get('directory')
         if folder: folder = Path(folder)
         elif source: folder = source.parent
         else: return dict(need_folder=True)
         if not folder.is_absolute() or not folder.is_dir(): raise ValueError('Choose an existing folder.')
-        name = Path(state['report'].get('source_name', 'image'))   # original file name: only (2) / (3) is added, the extension stays
+        name = Path(state['report'].get('source_name', 'image'))   # original file name: only (1) / (2) is added, the extension stays
         stem, suffix = (source.stem, source.suffix) if source else (name.stem, name.suffix if name.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg') else '.png')
         def view(mode):   # this analysis with every automatic width line measured as `mode`
             other = dict(state, annotations=self.width_annotations(state, mode)[0]); other.pop('measurements', None)
             return other
-        particles = any('particle' in a for a in state['annotations'].values())
-        # (tag, state to draw, length?, width?, CSV label prefix, row key, CSV column)
-        jobs = [('(2)', state, True, False, 'T', 'length_um', 'length'), ('(3)', view('perpendicular') if particles else state, False, True, 'D', 'width_um', 'width')]
-        if particles: jobs.insert(0, ('(1)', view('min'), False, True, 'D', 'width_um', 'min_feret_width'))
+        # (tag, state to draw, length?, width?, row key, CSV column)
+        jobs = [('(1)', view('min'), False, True, 'width_um', 'min_feret_width'), ('(2)', state, True, False, 'length_um', 'length')]
         targets = [folder/f'{stem}{job[0]}{suffix}' for job in jobs]
-        tables = [folder/f'{stem}{job[0]}.csv' for job in jobs]   # T# lengths / D# widths, as on the figures
-        # Existing name(1) / name(2) / name(3) files are replaced without asking: saving again after an edit is the normal case.
+        tables = [folder/f'{stem}{job[0]}.csv' for job in jobs]
+        # Existing name(1) / name(2) files are replaced without asking: saving again after an edit is the normal case.
         for target, (_, shown, length, width, *_) in zip(targets, jobs):
             figure = self.label_figure(shown, length, width, int(payload.get('font_size', 16)))
             partial = target.with_name('.'+target.name+'.partial')
@@ -509,14 +357,14 @@ class LabEditor(Editor):
             replace_file(partial, target)
         import csv
         unit = state['report'].get('measurement_unit', 'µm')
-        for table, (_, shown, _, _, prefix, key, name) in zip(tables, jobs):
-            rows = [r for r in self.measurements(shown)['candidates'] if r.get('tube') or r.get('particle')]
+        for table, (_, shown, _, _, key, name) in zip(tables, jobs):
+            rows = [r for r in self.measurements(shown)['candidates'] if r.get('particle')]
             partial = table.with_name('.'+table.name+'.partial')
             with open(partial, 'w', newline='', encoding='utf-8-sig') as out:   # utf-8-sig: Excel reads µm correctly
                 writer = csv.writer(out)
                 writer.writerow(['label', f'{name}_{unit}'])
                 for r in rows:
-                    if r.get(key) is not None: writer.writerow([r['candidate_id'] if r.get('particle') else f"{prefix}{r['candidate_id']}", f"{r[key]:.2f}"])
+                    if r.get(key) is not None: writer.writerow([r['candidate_id'], f"{r[key]:.2f}"])
             replace_file(partial, table)
         return dict(saved=[str(t) for t in targets+tables])
 
@@ -528,26 +376,39 @@ class LabEditor(Editor):
                 return Path(path) if path and Path(path).is_file() else None
         return None
 
+    def image_library(self):
+        """Each image also carries the folder it was opened from (None when unknown), so Open analysis can group by folder."""
+        entries, paths = super().image_library(), self.source_paths()
+        for entry in entries:
+            path = paths.get(entry['id'])
+            entry['folder'] = str(Path(path).parent) if path else None
+        return entries
+
     def source_paths(self):
         f = self.output_root/'source_paths.json'
         try: return json.loads(f.read_text(encoding='utf-8'))
         except (OSError, ValueError): return {}
 
-    # --- Batch: every image of a folder -> calibrate from its file, detect particles, save name(1)/(2)/(3) + CSVs beside it.
+    # --- Batch: every image of a folder -> calibrate from its file, detect particles, save name(1)/(2) + CSVs beside it.
     def batch_start(self, payload):
-        import re, threading
+        import math, re, threading
         folder = Path(str(payload.get('directory') or ''))
         if not folder.is_absolute() or not folder.is_dir(): raise ValueError('Choose an existing folder.')
         if getattr(self, 'batch', None) and self.batch['running']: raise ValueError('A batch is already running.')
         files = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg')
-                       and not re.search(r'\(\d+\)$', p.stem))   # name(1) / name(2) / name(3) are results, not inputs
+                       and not re.search(r'\(\d+\)$', p.stem))   # name(1) / name(2) (and older name(3)) are results, not inputs
         if not files: raise ValueError('No images in this folder.')
-        self.batch = dict(running=True, stop=False, folder=str(folder), total=len(files), done=0, current=None, results=[])
+        factor = payload.get('scale_factor', self.workflow.last_scale_factor())
+        if isinstance(factor, bool) or not isinstance(factor, (int, float)) or not math.isfinite(factor) or not .01 <= factor <= 100:
+            raise ValueError('Correction factor must be a number from 0.01 to 100.')
+        self.batch = dict(running=True, stop=False, folder=str(folder), total=len(files), done=0, current=None, results=[], scale_factor=float(factor))
         threading.Thread(target=self.batch_run, args=(files, payload.get('overwrite') is True), daemon=True).start()
         return self.batch_status()
 
     def batch_status(self):
-        return copy.deepcopy(getattr(self, 'batch', None) or dict(running=False, total=0, done=0, current=None, results=[]))
+        status = copy.deepcopy(getattr(self, 'batch', None) or dict(running=False, total=0, done=0, current=None, results=[]))
+        status['last_scale_factor'] = self.workflow.last_scale_factor()   # default for the next folder
+        return status
 
     def batch_stop(self):
         if getattr(self, 'batch', None): self.batch['stop'] = True
@@ -560,9 +421,9 @@ class LabEditor(Editor):
             b['current'] = path.name
             row = dict(name=path.name)
             try:
-                # Done = name(1), name(2) and name(3) are all there. An image without (1) (results older than the minimum Feret width) is analysed again.
-                if not overwrite and all(path.with_name(f'{path.stem}({n}){path.suffix}').exists() for n in (1, 2, 3)):
-                    row.update(status='skipped', note='already has (1), (2) and (3)')
+                # Done = name(1) and name(2) are both there; otherwise the image is analysed again.
+                if not overwrite and all(path.with_name(f'{path.stem}({n}){path.suffix}').exists() for n in (1, 2)):
+                    row.update(status='skipped', note='already has (1) and (2)')
                 else: row.update(self.batch_one(path, overwrite))
             except Exception as error:   # one bad image must not stop the folder
                 row.update(status='failed', note=str(error))
@@ -579,7 +440,7 @@ class LabEditor(Editor):
         pixels = meta.get('length_pixels') or (c.get('scale_pixels') if c.get('calibrated') else None) or 100
         scale = meta.get('label_um') or (pixels*meta['um_per_pixel'] if meta else c.get('scale_um') if c.get('calibrated') else None)
         config = dict(analysis_bottom=c['analysis_bottom'], preprocessing_mode='adjustable', normalize_enabled=False, background_strength=0, blur_method='none',
-            blur_strength=0, scale_um=scale or 1, scale_pixels=pixels if scale else 1, scale_factor=self.workflow.last_scale_factor(), min_contrast=0, min_area_pixels=1, points_per_side=16,
+            blur_strength=0, scale_um=scale or 1, scale_pixels=pixels if scale else 1, scale_factor=self.batch['scale_factor'], min_contrast=0, min_area_pixels=1, points_per_side=16,
             scale_confirmed=True, workspace_mode='report', calibrated=bool(scale))
         job = self.workflow.start(project['id'], config)['job_id']
         while True:
@@ -600,23 +461,6 @@ class LabEditor(Editor):
         paths = self.source_paths(); paths[digest] = str(path)
         self.output_root.mkdir(parents=True, exist_ok=True)   # a fresh install has no edits folder yet
         (self.output_root/'source_paths.json').write_text(json.dumps(paths, ensure_ascii=False, indent=1), encoding='utf-8')
-
-    def measure_tube(self, state, payload):
-        """Automatic centerline and width for an existing (SAM) mask, or D inside a `box`."""
-        from cnt_detect import measure_mask
-        if payload.get('box') is not None: return self.measure_box(state, payload)
-        if payload.get('edge') is not None: return self.measure_edges(state, payload)
-        ridge = self.tube_ridge(state)
-        identifier = payload.get('object_id')
-        if type(identifier) is not int or identifier not in state['masks']:
-            raise ValueError('Choose a segmented object first.')
-        c = measure_mask(state['gray'], state['masks'][identifier], ridge)
-        annotations = copy.deepcopy(state['annotations'])
-        annotations.setdefault(str(identifier), {}).update({k: v for k, v in tube_annotation(c).items() if k not in ('source', 'supplemental', 'review_status')})
-        result = self.save(state, dict(state['masks']), annotations, list(state['history'])+[state['revision']],
-            state['next_id'], dict(type='tube-measurement', object_id=identifier))
-        result.update(tube=self.tube_values(state, c))
-        return result
 
     def quick_segment(self, state, payload):
         self.check_revision(state, payload)
@@ -686,7 +530,7 @@ def make_handler(editor):
             return super().do_GET()
 
         def do_POST(self):
-            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/particle-width-mode','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop','/api/update-check','/api/update-install'):
+            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/particle-width-mode','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop','/api/update-check','/api/update-install'):
                 return super().do_POST()
             if not self.valid_host() or self.headers.get('X-Object-Editor') != '1':
                 return self.send(403, dict(error='Local access only'))
@@ -728,10 +572,6 @@ def make_handler(editor):
                     editor.check_revision(state, payload)
                     if self.path == '/api/manual-measurement':
                         result = editor.manual_measurement(state, payload)
-                    elif self.path == '/api/trace-tube':
-                        result = editor.trace_tube(state, payload)
-                    elif self.path == '/api/measure-tube':
-                        result = editor.measure_tube(state, payload)
                     elif self.path == '/api/detect-particles':
                         result = editor.detect_particles(state, payload)
                     elif self.path == '/api/measure-particle':

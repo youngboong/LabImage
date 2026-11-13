@@ -207,7 +207,6 @@ class Editor:
         table, stats, _, _, _ = measure_masks(ordered, state["gray"].shape, state["report"]["scale"]["um_per_pixel"], gray=state['gray'], manual=state.get('annotations', {}) if state['report'].get('workspace_mode') == 'report' else None)
         table['image_area_percent']=table['area_pixels']/(state['gray'].size)*100
         table['source']=table['candidate_id'].map(lambda i:state['annotations'].get(str(i),{}).get('source','automatic'))
-        table['tube']=table['candidate_id'].map(lambda i:'tube' in state['annotations'].get(str(i),{}))  # T#/D# in the list, as on the figure
         table['particle']=table['candidate_id'].map(lambda i:'particle' in state['annotations'].get(str(i),{}))
         table['particle_source']=table['candidate_id'].map(lambda i:state['annotations'].get(str(i),{}).get('particle',{}).get('source'))  # auto | click | manual
         for key in ('length_line', 'width_line', 'warning'):   # particle lines (image px) for the UI to draw and hit-test; the exclusion rule that fired at detection/click time

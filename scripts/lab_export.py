@@ -54,11 +54,11 @@ def export_images(editor, state, payload):
                 show_length=payload.get('show_length',True), show_width=payload.get('show_width',True),
                 show_ids=payload.get('labels',True), font_size=int(payload.get('font_size',16)))
             figure.save(staging/'measurements.png')
-            if any('tube' in a or 'particle' in a for a in state.get('annotations', {}).values()):
-                # Hand-labelled CNT figures keep lengths (T#) and widths (D#) on separate images.
+            if any('particle' in a for a in state.get('annotations', {}).values()):
+                # Particle figures keep lengths and widths on separate images.
                 common = dict(opacity=float(payload.get('opacity',18))/100, show_ids=payload.get('labels',True), font_size=int(payload.get('font_size',16)))
-                measured_overlay(state, show_length=True, show_width=False, **common).save(staging/'measurements_T.png')
-                measured_overlay(state, show_length=False, show_width=True, **common).save(staging/'measurements_D.png')
+                measured_overlay(state, show_length=True, show_width=False, **common).save(staging/'measurements_length.png')
+                measured_overlay(state, show_length=False, show_width=True, **common).save(staging/'measurements_width.png')
             original = Image.fromarray(state['rgb'])
             comparison = Image.new('RGB',(figure.width*2,figure.height))
             comparison.paste(original,(0,0)); comparison.paste(figure,(figure.width,0))
@@ -74,7 +74,7 @@ def export_images(editor, state, payload):
                 annotation = state['annotations'].get(str(i), {})
                 g = report_geometry(mask, annotation)
                 stats['measurement_paths'][str(i)] = dict(center=g.get('center_point'),
-                    paths=dict(length=g['length_path'], width=g['width_line']), tube=annotation.get('tube'),
+                    paths=dict(length=g['length_path'], width=g['width_line']),
                     methods=dict(length=annotation.get('measurement_methods', {}).get('length', g['length_method']),
                         width=annotation.get('measurement_methods', {}).get('width', 'unmeasured')))
             (staging/'measurements.json').write_text(json.dumps(stats, ensure_ascii=False, indent=2),encoding='utf-8')

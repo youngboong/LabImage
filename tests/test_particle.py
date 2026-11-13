@@ -149,7 +149,7 @@ def test_detect_is_one_revision_and_one_undo(lab):
     assert r['object_ids'] == [2, 3] and r['revision'] == 2 and len(state['history']) == 1
     assert r['excluded'] == dict(cut_off=1, overlapped=0, overlapped_shape=0, standing=0, not_particle=0, small=1)
     rows = {x['candidate_id']: x for x in editor.measurements(state)['candidates']}
-    assert [rows[i]['particle'] for i in (1, 2, 3)] == [False, True, True] and all(rows[i]['particle_source'] == 'auto' and not rows[i]['tube'] for i in (2, 3))
+    assert [rows[i]['particle'] for i in (1, 2, 3)] == [False, True, True] and all(rows[i]['particle_source'] == 'auto' for i in (2, 3))
     assert rows[2]['length_um'] == pytest.approx(121*UMP, abs=1.5*UMP) and rows[2]['width_um'] == pytest.approx(51*UMP, abs=2*UMP)
     with pytest.raises(ValueError, match='^No measurable particle found. Click a particle or draw the lines by hand.$'):
         editor.detect_particles(state, rev(state))   # everything is already measured
@@ -204,15 +204,18 @@ def test_save_labels_particle_only(lab, tmp_path):
     editor.detect_particles(state, rev(state))
     out = tmp_path/'out'; out.mkdir()
     r = editor.save_labels(state, dict(directory=str(out)))
-    names = ('img(1).png', 'img(2).png', 'img(3).png', 'img(1).csv', 'img(2).csv', 'img(3).csv')
-    assert sorted(Path(p).name for p in r['saved']) == sorted(names) and all((out/n).is_file() for n in names)
-    for name in ('(2)', '(3)'):
+    names = ('img(1).png', 'img(2).png', 'img(1).csv', 'img(2).csv')
+    assert sorted(Path(p).name for p in r['saved']) == sorted(names) and all((out/n).is_file() for n in names) and not (out/'img(3).png').exists()
+    for name in ('(1)', '(2)'):
         table = out/f'img{name}.csv'
         rows = list(csv.reader(open(table, encoding='utf-8-sig')))
         assert rows[0][0] == 'label' and [x[0] for x in rows[1:]] == ['1', '2']
-    low, old = ([float(x[1]) for x in list(csv.reader(open(out/f'img({n}).csv', encoding='utf-8-sig')))[1:]] for n in (1, 3))
-    assert len(low) == 2 and all(a <= b+.01 for a, b in zip(low, old))   # (1) minimum Feret is never wider than (3) perpendicular
-    assert editor.measurements(state)['particle_width_mode'] == 'min' and state['revision'] == 1   # saving both does not change the analysis
+    editor.particle_width_mode(state, dict(rev(state), mode='perpendicular'))
+    old = [r['width_um'] for r in editor.measurements(state)['candidates'] if r.get('particle')]
+    editor.save_labels(state, dict(directory=str(out)))
+    low = [float(x[1]) for x in list(csv.reader(open(out/'img(1).csv', encoding='utf-8-sig')))[1:]]
+    assert len(low) == 2 and all(a <= b+.01 for a, b in zip(low, old))   # (1) is the minimum Feret even while the toggle shows Perpendicular
+    assert editor.measurements(state)['particle_width_mode'] == 'perpendicular'   # saving does not change the analysis
 
 
 def test_overlay_labels_are_value_only_and_clear(lab):
@@ -258,7 +261,7 @@ def test_remove_axis_line_one_revision_and_one_axis_everywhere(lab, tmp_path):
         with pytest.raises(ValueError, match=message): editor.particle_line(state, dict(rev(state), points=None, **bad))
     out = tmp_path/'out'; out.mkdir()   # figures and CSVs cope with the missing axis
     editor.save_labels(state, dict(directory=str(out)))
-    assert [x[0] for x in list(csv.reader(open(out/'img(3).csv', encoding='utf-8-sig')))[1:]] == ['2']
+    assert [x[0] for x in list(csv.reader(open(out/'img(1).csv', encoding='utf-8-sig')))[1:]] == ['2']
     assert [x[0] for x in list(csv.reader(open(out/'img(2).csv', encoding='utf-8-sig')))[1:]] == ['1', '2']
     editor.particle_line(state, dict(rev(state), axis='width', points=[[100, 50], [100, 110]]))   # redraw after removal attaches again
     assert state['annotations']['1']['particle']['width_px'] == pytest.approx(60)
@@ -324,7 +327,7 @@ def test_batch_lists_only_originals_and_refuses_bad_folders(tmp_path, monkeypatc
     from lab_editor import LabEditor
     editor = LabEditor(output_root=tmp_path/'edits', project_root=tmp_path/'projects', device='cpu')
     folder = tmp_path/'images'; folder.mkdir()
-    for name in ('a.tif', 'a(1).tif', 'a(2).tif', 'a(3).tif', 'b.png', 'b(2).png', 'b(3).png', 'c.png', 'notes.txt'): (folder/name).write_bytes(b'x')
+    for name in ('a.tif', 'a(1).tif', 'a(2).tif', 'b.png', 'b(2).png', 'b(3).png', 'c.png', 'notes.txt'): (folder/name).write_bytes(b'x')
     seen = []
     monkeypatch.setattr(editor, 'batch_one', lambda path, overwrite: seen.append(path.name) or dict(status='saved', particles=1, excluded=0, unit='µm'))
     editor.batch_start(dict(directory=str(folder)))
@@ -332,10 +335,13 @@ def test_batch_lists_only_originals_and_refuses_bad_folders(tmp_path, monkeypatc
         if not editor.batch_status()['running']: break
         import time; time.sleep(.02)
     status = editor.batch_status()
-    assert seen == ['b.png', 'c.png'] and status['total'] == 3 and not status['running']   # a has (1), (2), (3): skipped. b has no (1): made again. c: new
+    assert seen == ['b.png', 'c.png'] and status['total'] == 3 and not status['running']   # a has (1) and (2): skipped. b has no (1): made again. c: new
     assert [(r['name'], r['status']) for r in status['results']] == [('a.tif', 'skipped'), ('b.png', 'saved'), ('c.png', 'saved')]
-    for bad in (dict(directory=str(tmp_path/'missing')), dict(directory='relative'), {}):
+    for bad in (dict(directory=str(tmp_path/'missing')), dict(directory='relative'), {}, dict(directory=str(folder), scale_factor=0), dict(directory=str(folder), scale_factor='2')):
         with pytest.raises(ValueError): editor.batch_start(bad)
+    assert status['scale_factor'] == 1. and status['last_scale_factor'] == 1.   # default: the last factor used (none yet)
+    editor.batch_start(dict(directory=str(folder), scale_factor=1.25))
+    assert editor.batch_status()['scale_factor'] == 1.25
 
 
 def test_width_mode_switches_between_minimum_and_perpendicular():
@@ -390,3 +396,26 @@ def test_correction_factor_scales_lengths_not_detection(lab):
     editor.workflow.root.mkdir(parents=True, exist_ok=True)
     (editor.workflow.root/'scale_factor.json').write_text('{"scale_factor": 1.05}', encoding='utf-8')
     assert editor.workflow.last_scale_factor() == 1.05
+
+
+def test_image_library_carries_the_source_folder(tmp_path, monkeypatch):
+    from lab_editor import LabEditor
+    from pore_editor import Editor
+    editor = LabEditor(output_root=tmp_path/'edits', project_root=tmp_path/'projects', device='cpu')
+    monkeypatch.setattr(Editor, 'image_library', lambda self: [dict(id='a', name='a.tif'), dict(id='b', name='b.tif')])
+    editor.remember_source('a', tmp_path/'run1'/'a.tif')
+    assert [e['folder'] for e in editor.image_library()] == [str(tmp_path/'run1'), None]   # b: opened before folders were recorded
+
+
+def test_drawn_particle_mask_follows_its_lines(lab):
+    editor, state = lab
+    r = editor.particle_line(state, dict(rev(state), axis='length', points=[[20, 150], [60, 150]]))   # free background: a new line-only particle
+    i = r['object_id']
+    editor.particle_line(state, dict(rev(state), axis='width', object_id=i, points=[[40, 140], [40, 165]]))
+    ys, xs = np.nonzero(state['masks'][i])
+    assert ys.min() <= 141 and ys.max() >= 164   # the mask now covers the width line too
+    editor.particle_line(state, dict(rev(state), axis='length', object_id=i, points=None))
+    ys, xs = np.nonzero(state['masks'][i])
+    assert xs.max()-xs.min() <= 4   # only the width line is left
+    r = editor.particle_line(state, dict(rev(state), axis='width', object_id=i, points=None))
+    assert r['removed'] and i not in state['masks'] and str(i) not in state['annotations']   # no line left: the particle is gone

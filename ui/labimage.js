@@ -1,8 +1,6 @@
 // LabImage's two workflows share immutable edits and the existing report composer.
 let labMode=null,labMeasurementImage=null,labOverlayEpoch=0,labSession=null;
-let labSample='particles'; // Report sample: particles (detect, select, edit lines) or tubes (CNT Tube tool)
-try{if(localStorage.getItem('labimage.sample')==='tubes')labSample='tubes'}catch{/* storage may be blocked */}
-const labRunText=()=>labMode==='labeling'?'Run automatic labeling':labSample==='particles'?'Detect particles':'Open measurement workspace';
+const labRunText=()=>labMode==='labeling'?'Run automatic labeling':'Detect particles';
 document.title='LabImage';
 document.querySelector('header h1').textContent='LabImage';
 document.querySelector('.app-brand span').textContent='SAM 2.1';
@@ -99,29 +97,16 @@ function labCalibrationVisibility(){
   updateCalibration();
 }
 $('labCalibrated').onchange=labCalibrationVisibility;
-// Report sample (Set up): Particles detects automatically after the analysis; Tubes opens the empty workspace as before.
-$('runAnalysis').insertAdjacentHTML('beforebegin','<fieldset id="labSample" class="segmented lab-report-only"><legend>Sample</legend><label><input type="radio" name="labSample" value="particles"><span>Particles</span></label><label><input type="radio" name="labSample" value="tubes"><span>Tubes (CNT)</span></label></fieldset><p id="labSampleHint" class="hint lab-report-only"></p>');
-function labSampleSet(value,remember=true){
-  labSample=value;
-  if(remember)try{localStorage.setItem('labimage.sample',value)}catch{/* storage may be blocked */}
-  $('labSample').querySelectorAll('input').forEach(r=>{r.checked=r.value===value});
-  $('labSampleHint').textContent=value==='particles'?'Confirming the calibration starts detection.':'Opens an empty workspace for the Tube tool.';
-  if(window.labRailReady)labRailSample(); // defined further down; this also runs during start-up
-  if(!window.activeStopOperation)$('runAnalysis').textContent=labRunText();
-  if(labMode==='report')document.querySelector('.steps [data-panel=editor] .sl-long').textContent=value==='particles'?'Measure particles':'Segment and measure';
-}
-$('labSample').addEventListener('change',e=>{if(e.target.name==='labSample')labSampleSet(e.target.value)});
 // Particles: the user's own tick on "Confirm calibration" goes straight on to analysis and detection (a scale read from the
 // microscope file is pre-confirmed without an event, so it waits for the Detect particles button).
-$('scaleConfirmed').addEventListener('change',e=>{if(e.isTrusted&&$('scaleConfirmed').checked&&labMode==='report'&&labSample==='particles'&&!busy&&!window.activeStopOperation)$('runAnalysis').onclick()});
-labSampleSet(labSample,false);
+$('scaleConfirmed').addEventListener('change',e=>{if(e.isTrusted&&$('scaleConfirmed').checked&&labMode==='report'&&!busy&&!window.activeStopOperation)$('runAnalysis').onclick()});
 const labRun=$('runAnalysis').onclick;
 $('runAnalysis').onclick=async()=>{
   const before=state?state.dataset+':'+state.revision:null;
   await labRun();
   // Particles: a new, empty report workspace gets Detect particles right away.
-  if(labMode==='report'&&labSample==='particles')for(let i=0;i<50&&(busy||!state||$('editorPanel').classList.contains('hidden'));i++)await new Promise(r=>setTimeout(r,100)); // the workspace may still be opening
-  if(labMode==='report'&&labSample==='particles'&&state&&!busy&&!state.candidates.length&&state.dataset+':'+state.revision!==before&&!$('editorPanel').classList.contains('hidden')){particleEnter('select');await particleDetect()}
+  if(labMode==='report')for(let i=0;i<50&&(busy||!state||$('editorPanel').classList.contains('hidden'));i++)await new Promise(r=>setTimeout(r,100)); // the workspace may still be opening
+  if(labMode==='report'&&state&&!busy&&!state.candidates.length&&state.dataset+':'+state.revision!==before&&!$('editorPanel').classList.contains('hidden')){particleEnter('select');await particleDetect()}
 };
 const labShowProject=showProject;
 showProject=async function(project){
@@ -178,7 +163,7 @@ window.onEditorAccepted=function(data){
   labMeasurementImage=null;labSetMode(data.workspace_mode||labMode||'report');
   labAccepted?.(data);labRefreshOverlay();
   // Another analysis opened: particles always start at Select particles (the last one may have been left in Edit lines).
-  if(labToolDataset!==data.dataset){if(labMode==='report'&&labSample==='particles')particleEnter('select');else if(mode==='select')document.querySelector('[data-mode="positive"]').onclick()}
+  if(labToolDataset!==data.dataset){if(labMode==='report')particleEnter('select');else if(mode==='select')document.querySelector('[data-mode="positive"]').onclick()}
   labToolDataset=data.dataset;
 };
 const labSelectImage=selectImage;
@@ -252,8 +237,8 @@ document.addEventListener('keydown',event=>{
   if(event.ctrlKey||event.metaKey||event.altKey||event.repeat||event.isComposing||busy||drag||!state)return;
   if($('editorPanel').classList.contains('hidden')||!labHome.classList.contains('hidden')||document.querySelector('dialog[open]'))return;
   if(event.target.closest?.('input,textarea,select')||event.target.isContentEditable)return;
-  const tool={KeyS:'select',KeyA:'positive',KeyD:'delete',KeyT:'tube',KeyP:'particle'}[event.code];
-  if(!tool||((tool==='tube'||tool==='particle')&&labMode!=='report'))return; // Tube and Particle are Report tools
+  const tool={KeyS:'select',KeyA:'positive',KeyD:'delete',KeyP:'particle'}[event.code];
+  if(!tool||(tool==='particle'&&labMode!=='report'))return; // Particle is a Report tool
   event.preventDefault();document.querySelector(`[data-mode="${tool}"]`).click();canvas.focus();
 });
 canvas.addEventListener('contextmenu',event=>{
@@ -280,8 +265,7 @@ $('clear').addEventListener('click',()=>{labSession=null});
 $('saveEditorImages').onclick=()=>work('Saving images…',async()=>{
   if(!state)return;
   if(labMode==='report'){
-    // Tubes: <name>(2) with T# only and <name>(3) with D# only, beside the original image.
-    // Particles: <name>(1) minimum Feret widths, <name>(2) lengths and <name>(3) widths perpendicular to the length, value-only labels, plus three CSVs.
+    // Particles: <name>(1) minimum Feret widths and <name>(2) lengths, value-only labels, plus two CSVs.
     const body={...payload(),font_size:Number($('labFontSize').value)};
     let saved=await api('save-labels',body);
     if(saved.need_folder){const picked=await api('choose-export-folder',{});if(!picked.directory){setStatus('Save cancelled.');return}body.directory=picked.directory;saved=await api('save-labels',body)}
@@ -291,7 +275,7 @@ $('saveEditorImages').onclick=()=>work('Saving images…',async()=>{
   const result=await api('export-images',{...payload(),directory:picked.directory,opacity:Number($('poreOpacity').value),labels:$('showPoreLabels').checked,show_length:$('labShowLength').checked,show_width:$('labShowWidth').checked,font_size:Number($('labFontSize').value)});
   setStatus((labMode==='labeling'?'Instance masks saved to ':'Measurement figure and CSV saved to ')+result.exported_folder);
 });
-// "Saved" dialog after Save images (Tubes and Particles): native modal <dialog>, so focus stays inside and Esc closes it.
+// "Saved" dialog after Save images (Particles): native modal <dialog>, so focus stays inside and Esc closes it.
 // No "Open folder" button: the backend has no API that reveals a folder.
 const labSavedDialog=document.createElement('dialog');labSavedDialog.id='labSavedDialog';labSavedDialog.setAttribute('aria-labelledby','labSavedTitle');
 labSavedDialog.innerHTML=`<div class="dialog-head"><h2 id="labSavedTitle">${window.labIcon('check','saved-icon')}Saved</h2></div><p class="hint">Check the figures and tables in this folder:</p><p id="labSavedFolder" class="saved-folder"></p><ul id="labSavedFiles" class="saved-files"></ul><div class="row"><button id="labSavedOk" class="primary" type="button">OK</button></div>`;
@@ -299,9 +283,9 @@ document.body.append(labSavedDialog);
 $('labSavedOk').onclick=()=>labSavedDialog.close();
 // Enter closes it too. The OK button cannot take focus when the dialog opens (buttons are disabled while saving), so the key is caught on the document.
 document.addEventListener('keydown',event=>{if(event.key==='Enter'&&labSavedDialog.open){event.preventDefault();event.stopImmediatePropagation();labSavedDialog.close()}},true);
-// Batch: every image of a folder is calibrated from its file, detected and saved beside the original (name(2), name(3), CSVs).
-// Images that already have (1), (2) and (3) are skipped. Without (1) (results older than the minimum Feret width) an image is analysed again. Each result can be reviewed later from Open analysis.
-$('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-report-only"><button id="labBatch" type="button" title="Detect particles in every image of a folder and save name(1) minimum Feret width, name(2) length, name(3) perpendicular width and CSV files beside each image. Images that already have all three are skipped.">Process a folder…</button></div>');
+// Batch: every image of a folder is calibrated from its file, detected and saved beside the original (name(1), name(2), CSVs).
+// Images that already have (1) and (2) are skipped; otherwise an image is analysed again. Each result can be reviewed later from Open analysis.
+$('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-report-only"><button id="labBatch" type="button" title="Detect particles in every image of a folder and save name(1) minimum Feret width, name(2) length and CSV files beside each image. Images that already have both are skipped.">Process a folder…</button></div>');
 // Update: the latest GitHub release may carry a small patch; the app downloads it, closes, swaps the files and starts again.
 $('newImagePane').insertAdjacentHTML('beforeend','<div class="row lab-update"><button id="labUpdate" type="button">Check for updates</button><span id="labUpdateState" class="hint" role="status"></span></div>');
 $('labUpdate').onclick=async()=>{
@@ -318,16 +302,17 @@ $('labUpdate').onclick=async()=>{
   finally{$('labUpdate').disabled=false}
 };
 const labBatchDialog=document.createElement('dialog');labBatchDialog.id='labBatchDialog';labBatchDialog.setAttribute('aria-labelledby','labBatchTitle');
-labBatchDialog.innerHTML='<div class="dialog-head"><h2 id="labBatchTitle">Process a folder</h2></div><p id="labBatchFolder" class="saved-folder"></p><p id="labBatchState" class="hint" role="status"></p><progress id="labBatchBar" max="1" value="0" aria-label="Batch progress"></progress><div class="results-wrap"><table class="results"><caption class="sr-only">Batch results</caption><thead><tr><th scope="col">Image</th><th scope="col">Result</th></tr></thead><tbody id="labBatchRows"></tbody></table></div><div class="row"><button id="labBatchStop" type="button">Stop</button><button id="labBatchClose" class="primary" type="button">Close</button></div>';
+labBatchDialog.innerHTML='<div class="dialog-head"><h2 id="labBatchTitle">Process a folder</h2></div><p id="labBatchFolder" class="saved-folder"></p><p id="labBatchState" class="hint" role="status"></p><form id="labBatchSetup" class="row"><label class="field">Correction factor<input id="labBatchFactor" type="number" min="0.01" max="100" step="any" required title="Every length is multiplied by this factor, areas by its square. Detection is not affected."></label><button id="labBatchStart" class="primary" type="submit">Start</button></form><progress id="labBatchBar" max="1" value="0" aria-label="Batch progress"></progress><div class="results-wrap"><table class="results"><caption class="sr-only">Batch results</caption><thead><tr><th scope="col">Image</th><th scope="col">Result</th></tr></thead><tbody id="labBatchRows"></tbody></table></div><div class="row"><button id="labBatchStop" type="button">Stop</button><button id="labBatchClose" class="primary" type="button">Close</button></div>';
 document.body.append(labBatchDialog);
 let labBatchTimer=0;
 function labBatchShow(b){
   const text=r=>r.status==='saved'?`${r.particles} particle${r.particles===1?'':'s'} saved, ${r.excluded} left out${r.unit==='px'?' (px: no scale in file)':''}`:r.status==='skipped'?'Skipped: '+r.note:r.status==='no particles'?'No measurable particle':'Failed: '+(r.note||'');
   $('labBatchFolder').textContent=b.folder||'';$('labBatchBar').max=b.total||1;$('labBatchBar').value=b.done;
   const n=k=>b.results.filter(r=>r.status===k).length;
-  $('labBatchState').textContent=b.running?`${b.done} / ${b.total}${b.current?' · '+b.current:''}`:`Done: ${n('saved')} saved, ${n('skipped')} skipped, ${n('no particles')} without particles, ${n('failed')} failed.`;
+  $('labBatchState').textContent=b.running?`${b.done} / ${b.total}${b.current?' · '+b.current:''} · correction ×${b.scale_factor}`:`Done: ${n('saved')} saved, ${n('skipped')} skipped, ${n('no particles')} without particles, ${n('failed')} failed.`;
   $('labBatchRows').replaceChildren(...b.results.map(r=>{const tr=el('tr');tr.append(el('td','',r.name),el('td',r.status==='failed'?'error':'',text(r)));return tr}));
   $('labBatchStop').hidden=!b.running;$('labBatchClose').disabled=b.running;
+  $('labBatchSetup').hidden=true;$('labBatchBar').hidden=false;labBatchDialog.querySelector('.results-wrap').hidden=false;
 }
 async function labBatchPoll(){
   clearTimeout(labBatchTimer);
@@ -338,10 +323,25 @@ async function labBatchPoll(){
 $('labBatch').onclick=async()=>{
   try{
     const picked=await api('choose-export-folder',{});if(!picked.directory)return;
-    labBatchShow(await api('batch-particles',{directory:picked.directory}));
+    const last=await api('batch-status',{});
+    // ask for the correction factor first (the last one used is the default), then start
+    labBatchDirectory=picked.directory;
+    $('labBatchFolder').textContent=picked.directory;$('labBatchState').textContent='Lengths are multiplied by the correction factor. Use 1 for none.';
+    $('labBatchRows').replaceChildren();$('labBatchBar').hidden=true;labBatchDialog.querySelector('.results-wrap').hidden=true;$('labBatchStop').hidden=true;$('labBatchClose').disabled=false;
+    $('labBatchFactor').value=last.last_scale_factor??1;$('labBatchSetup').hidden=false;
     if(!labBatchDialog.open)labBatchDialog.showModal();
-    labBatchTimer=setTimeout(labBatchPoll,1000);
+    $('labBatchFactor').focus();$('labBatchFactor').select();
   }catch(error){setStatus(error.message,true);jobMessage?.(error.message,true)}
+};
+let labBatchDirectory='';
+$('labBatchSetup').onsubmit=async event=>{
+  event.preventDefault();
+  $('labBatchStart').disabled=true;
+  try{
+    labBatchShow(await api('batch-particles',{directory:labBatchDirectory,scale_factor:Number($('labBatchFactor').value)}));
+    labBatchTimer=setTimeout(labBatchPoll,1000);
+  }catch(error){$('labBatchState').textContent=error.message}
+  finally{$('labBatchStart').disabled=false}
 };
 $('labBatchStop').onclick=async()=>{$('labBatchStop').disabled=true;try{await api('batch-stop',{})}finally{$('labBatchStop').disabled=false}};
 $('labBatchClose').onclick=()=>labBatchDialog.close();
@@ -372,7 +372,7 @@ const labModeLayout=labSetMode;
 labSetMode=function(value){
   labModeLayout(value);
   if(window.labRailReady)labRailSample(); // defined further down; this also runs during start-up
-  const steps=value==='report'?[['Load image','Load'],['Set scale','Scale'],[labSample==='particles'?'Measure particles':'Segment and measure','Measure'],['Build report','Report']]:[['Load image','Load'],['Set up','Setup'],['Label and refine','Label'],['Build report','Report']];
+  const steps=value==='report'?[['Load image','Load'],['Set scale','Scale'],['Measure particles','Measure'],['Build report','Report']]:[['Load image','Load'],['Set up','Setup'],['Label and refine','Label'],['Build report','Report']];
   document.querySelectorAll('.steps [data-panel]').forEach((b,i)=>{b.querySelector('.sl-long').textContent=steps[i][0];b.querySelector('.sl-short').textContent=steps[i][1]});
   document.querySelector('#setupPanel .workspace-intro h2').textContent=value==='report'?'Image and scale':'Labeling setup';
   if(value==='report'){
@@ -466,11 +466,10 @@ window.onEditorAccepted=function(data){
   if([...$('manualObject').options].some(o=>o.value===previous))$('manualObject').value=previous;
 };
 
-// ---- Report workspace UI: tool rail, hint strip, collapsible panels, Tube tool + results (docs/cnt-design.md).
+// ---- Report workspace UI: tool rail, hint strip, collapsible panels, particle results.
 const ICON=window.LAB_ICON; // ui/icons.js
 const TOOL_UI={
   select:{name:'Select',key:'S',tip:'Select objects. Ctrl-click adds or removes one.',text:'Click to select. Ctrl-click adds or removes.',keys:[['Ctrl+click','multi-select'],['Del','delete selected']]},
-  tube:{name:'Tube',key:'T',tip:'Measure a tube: drag along it, or right-drag a box across it for width.',keys:[['Drag','trace'],['Right-drag','width box'],['Click','both ends instead'],['Shift+click','bend'],['Enter','finish'],['Esc','cancel'],['Ctrl+click','segment with SAM']]},
   particle:{name:'Particle',key:'P',tip:'Measure flat particles: detect them all, click one, or draw its length and width lines.'},
   positive:{name:'Add',key:'A',tip:'Add an object: click inside it and SAM segments it.',text:'Click inside an object to segment it with SAM. Shift-click refines; right-click excludes.',keys:[['Shift+click','refine'],['Right-click','exclude'],['Ctrl+Z','undo']]},
   'prompt-positive':{name:'Point +',tip:'Add an include point to a box or region preview.',text:'Add an include point to refine the current box or preview.',keys:[['Enter','apply preview']]},
@@ -483,20 +482,9 @@ const TOOL_UI={
   back:{name:'Undo',tip:'Undo the last trace point, drawing input or saved edit (Ctrl+Z).'},
   clear:{name:'Clear',tip:'Clear the current drawing and cancel any trace.'}
 };
-const TUBE_STYLE={max:20};
-const traceColor=()=>getComputedStyle(document.body).getPropertyValue('--trace').trim()||'#37e6ff'; // the --trace token in theme.css
-let tube={dataset:null,trace:[],cursor:null},tubeFresh=null,tubeKey='',tubeTimer=0;
-const TUBE_KINDS={td:{hint:'T is the length; D is the width on a clean section.'},t:{hint:'Only the length (T) is saved.'},d:{hint:'Right-drag a box across a clean, straight part of a tube, or click once on it. With Line set to Manual: drag along one edge, then click the other edge. Only the width (D) is saved.',strip:'Right-drag a box across a clean part of a tube, or click it.'}};
-// Gestures in the Tube tool: a right drag boxes D. Less travel than GESTURE_PX screen px does nothing.
+// Drag gestures (particle Draw): less travel than GESTURE_PX screen px is a click.
 const GESTURE_PX=5;
-let gesture=null,tubeMenuHold=-1e9; // gesture: {button, id, x, y, shift, moved, points: image px}
-let tubeKind='td';
-try{const saved=localStorage.getItem('labimage.tubeKind');if(saved in TUBE_KINDS)tubeKind=saved}catch{/* storage may be blocked */}
-let tubeLine='auto'; // auto: click both ends and the ridge is traced; manual: every click is a vertex of a straight-segment line
-try{if(localStorage.getItem('labimage.tubeLine')==='manual')tubeLine='manual'}catch{/* storage may be blocked */}
-const tubeManual=()=>tubeLine==='manual',MANUAL_MAX=500;
-const tubeEdgeMode=()=>tubeManual()&&tubeKind==='d'; // two clicks along one edge, one click on the other edge
-const tubeIds=new Set(); // fallback for a backend that does not send `tube` on measurement rows
+let gesture=null,resultFresh=null,resultKey='',resultTimer=0,labDataset=null; // gesture: {button, id, x, y, shift, moved, points: image px}
 // Particle tool (docs/particle-design.md, docs/ui-design.md "Particle workflow"): stage Select particles (raw image left, selected particles right;
 // a click adds or removes a whole particle), then stage Edit lines (one image; Select a line and delete it, or Draw a length or width line).
 const PARTICLE_STAGES={select:'Select particles',lines:'Edit lines'};
@@ -506,14 +494,14 @@ let particle={trace:[],cursor:null,sent:null},particleAxis='length',particleStag
 const svg=(path,cls='')=>`<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${path}</svg>`;
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 
-// Tool rail: one icon rail for both workspaces (icon + name + shortcut). Tube stays Report-only through its class.
+// Tool rail: one icon rail for both workspaces (icon + name + shortcut). Particle stays Report-only through its class.
 const labSeparators=['sep-a','sep-b','sep-c'].map(cls=>Object.assign(document.createElement('span'),{className:'tool-sep '+cls,role:'separator'}));
 // Keep DOM order equal to the visual order so Tab follows the rail.
 function labRailOrder(){
   const items=[...tools.querySelectorAll('[data-mode],#back,#clear')];
   labSeparators.forEach(x=>x.remove());
   const pick=k=>labSeparators.find(x=>x.classList.contains(k))??items.find(b=>(b.dataset.mode||b.id)===k);
-  ['select','tube','particle','sep-a','positive','prompt-positive','negative','box','polygon','ellipse','cut','sep-b','delete','sep-c','back','clear'].map(pick).filter(Boolean).forEach(n=>tools.append(n));
+  ['select','particle','sep-a','positive','prompt-positive','negative','box','polygon','ellipse','cut','sep-b','delete','sep-c','back','clear'].map(pick).filter(Boolean).forEach(n=>tools.append(n));
 }
 function labRailRender(){
   labRailOrder();
@@ -535,24 +523,22 @@ labSetMode=function(value){
 // Contextual hint strip above the image (both workspaces; fixed 40 px so the canvas never moves).
 const toolStrip=document.createElement('section');
 toolStrip.id='toolStrip';toolStrip.setAttribute('aria-label','Current tool');
-toolStrip.innerHTML=`<div class="ts-name">${svg('')}<span id="tsName"></span></div><p class="ts-text" id="tsText"></p><ol class="ts-steps" id="tsSteps" aria-label="Tube tool steps"></ol>
-<fieldset id="tubeKind" class="segmented lab-report-only"><legend>Measure</legend><label><input type="radio" name="tubeKind" value="td" data-kind="td"><span>Length + Width</span></label><label><input type="radio" name="tubeKind" value="t" data-kind="t"><span>Length only</span></label><label><input type="radio" name="tubeKind" value="d" data-kind="d"><span>Width only</span></label></fieldset><fieldset id="tubeLine" class="segmented lab-report-only"><legend>Line</legend><label><input type="radio" name="tubeLine" value="auto"><span>Auto</span></label><label><input type="radio" name="tubeLine" value="manual"><span>Manual</span></label></fieldset><button id="particleDetect" class="sm lab-report-only" type="button" title="Find and measure every flat, whole particle again (about 10 s). Ctrl+Z removes the added ones.">Detect particles</button><fieldset id="particleEdit" class="segmented lab-report-only"><legend>Tool</legend><label><input type="radio" name="particleEdit" value="select"><span>Select</span></label><label><input type="radio" name="particleEdit" value="draw"><span>Draw</span></label></fieldset><fieldset id="particleAxis" class="segmented lab-report-only"><legend>Line</legend><label><input type="radio" name="particleAxis" value="length"><span><svg class="pl-key" viewBox="0 0 20 10" aria-hidden="true" focusable="false"><path class="h" d="M3 5h14M3 1.5v7M17 1.5v7"/><path class="c len" d="M3 5h14M3 1.5v7M17 1.5v7"/></svg>Length</span></label><label><input type="radio" name="particleAxis" value="width"><span><svg class="pl-key" viewBox="0 0 20 10" aria-hidden="true" focusable="false"><path class="h" d="M4 5h12"/><path class="c wid" d="M4 5h12"/><circle class="d wid" cx="4" cy="5" r="2.6"/><circle class="d wid" cx="16" cy="5" r="2.6"/></svg>Width</span></label></fieldset><fieldset id="particleWidthMode" class="segmented lab-report-only" title="Which automatic width lines are shown and edited. Save image writes both: name(1) Minimum, name(3) Perpendicular. Lines you drew by hand are the same in both."><legend>Width</legend><label title="Minimum Feret: the narrowest gap between two parallel lines that hold the particle."><input type="radio" name="particleWidthMode" value="min" checked><span>Minimum</span></label><label title="The earlier width: Feret diameter perpendicular to the length line."><input type="radio" name="particleWidthMode" value="perpendicular"><span>Perpendicular</span></label></fieldset><button id="particleDetails" class="sm lab-report-only" type="button" title="Open the Details window: table and distributions">Details</button><button id="particleRemove" class="danger sm lab-report-only" type="button" aria-keyshortcuts="Delete">Remove selected</button><button id="particleNext" class="primary sm lab-report-only" type="button">Next: edit lines</button><p class="ts-keys" id="tsKeys"></p>`;
+toolStrip.innerHTML=`<div class="ts-name">${svg('')}<span id="tsName"></span></div><p class="ts-text" id="tsText"></p><ol class="ts-steps" id="tsSteps" aria-label="Particle stages"></ol>
+<button id="particleDetect" class="sm lab-report-only" type="button" title="Find and measure every flat, whole particle again (about 10 s). Ctrl+Z removes the added ones.">Detect particles</button><fieldset id="particleEdit" class="segmented lab-report-only"><legend>Tool</legend><label><input type="radio" name="particleEdit" value="select"><span>Select</span></label><label><input type="radio" name="particleEdit" value="draw"><span>Draw</span></label></fieldset><fieldset id="particleAxis" class="segmented lab-report-only"><legend>Line</legend><label><input type="radio" name="particleAxis" value="length"><span><svg class="pl-key" viewBox="0 0 20 10" aria-hidden="true" focusable="false"><path class="h" d="M3 5h14M3 1.5v7M17 1.5v7"/><path class="c len" d="M3 5h14M3 1.5v7M17 1.5v7"/></svg>Length</span></label><label><input type="radio" name="particleAxis" value="width"><span><svg class="pl-key" viewBox="0 0 20 10" aria-hidden="true" focusable="false"><path class="h" d="M4 5h12"/><path class="c wid" d="M4 5h12"/><circle class="d wid" cx="4" cy="5" r="2.6"/><circle class="d wid" cx="16" cy="5" r="2.6"/></svg>Width</span></label></fieldset><fieldset id="particleWidthMode" class="segmented lab-report-only" title="Which automatic width lines are shown and edited. Save image writes name(1) with the minimum width either way. Lines you drew by hand are the same in both."><legend>Width</legend><label title="Minimum Feret: the narrowest gap between two parallel lines that hold the particle."><input type="radio" name="particleWidthMode" value="min" checked><span>Minimum</span></label><label title="The earlier width: Feret diameter perpendicular to the length line."><input type="radio" name="particleWidthMode" value="perpendicular"><span>Perpendicular</span></label></fieldset><button id="particleDetails" class="sm lab-report-only" type="button" title="Open the Details window: table and distributions">Details</button><button id="particleRemove" class="danger sm lab-report-only" type="button" aria-keyshortcuts="Delete">Remove selected</button><button id="particleNext" class="primary sm lab-report-only" type="button">Next: edit lines</button><p class="ts-keys" id="tsKeys"></p>`;
 document.querySelector('.document-toolbar').after(toolStrip);
 document.querySelector('.document-toolbar').before(tools); // DOM order = Tab order: rail, document bar, strip, canvas, inspector
 function labStrip(){
   if(!labMode)return;
-  const meta=TOOL_UI[mode]||TOOL_UI.select,n=tube.trace.length,isTube=mode==='tube',isParticle=mode==='particle';
+  const meta=TOOL_UI[mode]||TOOL_UI.select,isParticle=mode==='particle';
   const toolChanged=document.body.dataset.tool!==mode;
   const layoutChanged=toolChanged||(isParticle&&document.body.dataset.particleStage!==particleStage);
   document.body.dataset.tool=mode;document.body.dataset.particleStage=particleStage;document.body.dataset.particleEdit=particleLineTool;
   const [capL,capR]=document.querySelectorAll('.comparison-pane h2');
   capL.textContent=isParticle?'Raw image':'Original';capR.textContent=isParticle?(particleStage==='select'?'Selected particles: click to add or remove':'Length and width lines'):'Segmentation';
-  if(layoutChanged)window.resizeComparison?.(); // Tube and Edit lines hide the Original pane; refit the image to the pane that is left
+  if(layoutChanged)window.resizeComparison?.(); // Edit lines hides the Original pane; refit the image to the pane that is left
   toolStrip.querySelector('.ts-name svg').innerHTML=ICON[mode]||ICON.select;
   $('tsName').textContent=meta.name;
-  const spot=isTube&&tubeKind==='d'&&!tubeManual();
-  $('tsText').textContent=$('tsText').title=spot?TUBE_KINDS.d.strip:isParticle?particleHint():meta.text||'';$('tsText').hidden=isTube&&!spot||isParticle;$('tsSteps').hidden=!(isTube&&!spot||isParticle);
-  $('tsSteps').setAttribute('aria-label',isParticle?'Particle stages':'Tube tool steps');
+  $('tsText').textContent=$('tsText').title=isParticle?particleHint():meta.text||'';$('tsText').hidden=isParticle;$('tsSteps').hidden=!isParticle;
   $('openPoreDetails').lastChild.textContent=isParticle?'Particle details':'Open object details'; // PoreSAM: Details opens from the list panel
   if(isParticle){ // the two stages; the other stage is a button, so Back and Next are one click
     $('tsSteps').classList.add('idle');
@@ -561,15 +547,8 @@ function labStrip(){
       if(now)li.setAttribute('aria-current','step');else{t.type='button';t.setAttribute('aria-label',(i?'Go to ':'Back to ')+label);t.onclick=()=>particleStageSet(s);t.disabled=busy||!state}
       t.append(el('b','',String(i+1)),el('span','ts-label',label));return li;
     }));
-  }else{
-  // Auto: click both ends (Shift-click bends). Manual: click every vertex, then click the last one again or press Enter.
-  const steps=tubeEdgeMode()?[['Drag along one edge'],['Click the other edge']]:tubeManual()?[['Click along the tube'],['Click the last point again','or Enter']]:[['Click one end'],['Shift-click to add bends','(optional)'],['Click the other end']];
-  const cls=tubeEdgeMode()?[n>1?'done':'now',n>1?'now':'']:tubeManual()?[n?'done':'now',n>1?'now':'']:[n?'done':'now',n>1?'done':'',n?'now':''];
-  $('tsSteps').classList.toggle('idle',!n);
-  $('tsSteps').replaceChildren(...steps.map(([label,note],i)=>{const li=el('li',cls[i]);li.dataset.step=i+1;li.append(el('b','',String(i+1)),el('span','ts-label',label));if(note)li.append(' ',el('small','',note));return li}));
   }
   $('tsKeys').replaceChildren();
-  if(isTube&&n)$('tsKeys').append(el('span','ts-count',n+(n>1?' points':' point')));
   for(const [k,t] of (isParticle?particleKeys():meta.keys)||[]){const s=el('span');s.append(el('kbd','',k),t);$('tsKeys').append(s)}
   document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.classList.contains('active'))));
 }
@@ -586,137 +565,42 @@ function labCollapsible(panel,collapsed){
 }
 labCollapsible(labMeasurements,true);labCollapsible(manualPanel,false);
 
-// Tube panel: results list for every measured object.
-const tubePanel=document.createElement('section');
-tubePanel.className='panel lab-report-only';tubePanel.id='tubePanel';
-tubePanel.innerHTML=`<div class="panel-head"><h2><span class="tube-only">Tubes</span><span class="particle-only">Particles</span> <span id="tubeCount" class="chip-count" data-n="0"></span></h2><button id="tubeUndo" class="sm" type="button" title="Undo the last point or saved edit (Ctrl+Z)">Undo</button></div>
-<p id="tubeStatus" class="hint" role="status"></p>
+// Results panel: every measured particle.
+const resultPanel=document.createElement('section');
+resultPanel.className='panel lab-report-only';resultPanel.id='resultPanel';
+resultPanel.innerHTML=`<div class="panel-head"><h2>Particles <span id="resultCount" class="chip-count" data-n="0"></span></h2><button id="resultUndo" class="sm" type="button" title="Undo the last point or saved edit (Ctrl+Z)">Undo</button></div>
+<p id="resultStatus" class="hint" role="status"></p>
 <p id="particleModeHint" class="hint particle-only"></p>
-<button id="tubeCalib" class="sm" type="button" hidden title="Lengths are in pixels until the scale is set">${svg(ICON.warning)}Lengths are in pixels. Set the scale</button>
-<div id="tubeEmpty" class="empty">${svg(ICON.tube)}<p>No tubes measured yet.</p><button id="tubeStart" class="primary" type="button" title="Click both ends of a tube; right-drag a box across it for its width">Start tracing <kbd>T</kbd></button></div>
+<button id="resultCalib" class="sm" type="button" hidden title="Lengths are in pixels until the scale is set">${svg(ICON.warning)}Lengths are in pixels. Set the scale</button>
 <div id="particleEmpty" class="empty particle-only">${svg(ICON.particle)}<p>No particles yet.</p><button id="particleEmptyDetect" class="primary" type="button" title="Find and measure every flat, whole particle (about 10 s)">Detect particles</button></div>
-<div id="tubeResults" class="results-wrap" hidden><table class="results"><caption class="sr-only">Measured objects</caption><thead><tr><th scope="col">ID</th><th scope="col" id="tubeLenHead">Length</th><th scope="col" id="tubeWidHead">Width</th><th scope="col"><span class="sr-only">Delete</span></th></tr></thead><tbody id="tubeRows"></tbody><tfoot id="tubeFoot"></tfoot></table></div>`;
-manualPanel.before(tubePanel);
-const tubeTool=document.createElement('button');
-tubeTool.id='tubeTool';tubeTool.dataset.mode='tube';tubeTool.className='lab-report-only';
-tubeTool.title='Click along a tube to measure its length and width.';
-tools.insertBefore(tubeTool,document.querySelector('[data-mode="negative"]'));
+<div id="resultTable" class="results-wrap" hidden><table class="results"><caption class="sr-only">Measured objects</caption><thead><tr><th scope="col">ID</th><th scope="col" id="resultLenHead">Length</th><th scope="col" id="resultWidHead">Width</th><th scope="col"><span class="sr-only">Delete</span></th></tr></thead><tbody id="resultRows"></tbody><tfoot id="resultFoot"></tfoot></table></div>`;
+manualPanel.before(resultPanel);
 const particleTool=document.createElement('button');
 particleTool.id='particleTool';particleTool.dataset.mode='particle';particleTool.className='lab-report-only';
 tools.insertBefore(particleTool,document.querySelector('[data-mode="negative"]'));
-$('tubeStart').onclick=()=>tubeTool.click();
-$('tubeCalib').onclick=()=>document.querySelector('.steps [data-panel=setup]')?.click();
-$('tubeUndo').onclick=()=>labUndo();
-function tubeKindSet(kind,remember=true){
-  tubeKind=kind;
-  if(remember)try{localStorage.setItem('labimage.tubeKind',kind)}catch{/* storage may be blocked */}
-  $('tubeKind').querySelectorAll('input').forEach(r=>{r.checked=r.value===kind});
-  $('tubeKind').title=TUBE_KINDS[kind].hint; // help lives in the tooltip; the inspector keeps the table only
-  tubeCancel();
-}
-function tubeLineSet(line,remember=true){
-  tubeLine=line;$('tubeLine').title=line==='manual'?'Click along the tube; the line is straight between clicks. Click the last point again or press Enter to finish.':'Click both ends and the tube is traced; Shift-click adds a bend.';
-  if(remember)try{localStorage.setItem('labimage.tubeLine',line)}catch{/* storage may be blocked */}
-  $('tubeLine').querySelectorAll('input').forEach(r=>{r.checked=r.value===line});
-  tubeCancel();
-}
-$('tubeLine').addEventListener('change',e=>{if(e.target.name==='tubeLine')tubeLineSet(e.target.value)});
-$('tubeKind').addEventListener('change',e=>{if(e.target.name==='tubeKind')tubeKindSet(e.target.value)}); // native radios: arrow keys work without JS
-
-function tubeUpdate(){
-  const n=tube.trace.length;
-  $('tubeStatus').classList.remove('error');
-  $('tubeStatus').textContent=!n?'':tubeEdgeMode()?(n<2?'Click a second point along the same edge.':'Click the other edge of the tube; D is the distance between the two parallel lines.'):tubeManual()?`Line: ${n} point${n>1?'s':''}. Click the next point; click the last point again or press Enter to finish.`:`Tracing: ${n} point${n>1?'s':''}. Click the other end, Shift-click to add a bend, or press Enter to finish.`;
-  labStrip();draw();
-}
-function tubeCancel(){tube.trace=[];tube.cursor=null;tubeUpdate()}
+$('resultCalib').onclick=()=>document.querySelector('.steps [data-panel=setup]')?.click();
+$('resultUndo').onclick=()=>labUndo();
 function labUndo(){
   if(busy)return;
-  if(tube.trace.length){tube.trace.pop();tubeUpdate();return}
   if(particle.trace.length){particleCancel();return}
   if(inputHistory.length)return undoInput();
   if(state?.can_undo)return undoSavedEdit();
 }
 const labBack=$('back').onclick;
 $('back').onclick=()=>labMode==='report'?labUndo():labBack();
-$('clear').addEventListener('click',()=>{if(tube.trace.length)tubeCancel()});
-tubeTool.onclick=()=>{
-  if(busy)return;
-  document.querySelector('[data-mode="select"]').click();
-  mode='tube';labResetPrompt();manualStop();tube.trace=[];tube.cursor=null;canvas.style.cursor='crosshair';
-  document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b===tubeTool));
-  $('predict').classList.add('hidden');$('toolHint').textContent=tubeEdgeMode()?'Drag along one edge of the tube, then click the other edge.':tubeKind==='d'?'Right-drag a box across a clean part of a tube, or click it once.':(tubeManual()?'Click along the tube to draw the line.':'Click both ends of a tube.')+' Right-drag a box for width'+(tubeKind==='td'?'; Ctrl-click uses SAM.':'.');
-  window.updateToolLayout?.();tubeUpdate();
-};
-document.querySelectorAll('[data-mode]').forEach(b=>{if(b!==tubeTool)b.addEventListener('click',()=>{if(tube.trace.length)tubeCancel()})});
 
 // Report-mode control states that controls() cannot know (it only toggles by busy).
 function labReportControls(){
-  tubeTool.disabled=busy||!state;
-  $('tubeStart').disabled=busy||!state;
-  $('tubeKind').querySelectorAll('input').forEach(r=>r.disabled=busy||!state);
-  $('tubeLine').querySelectorAll('input').forEach(r=>r.disabled=busy||!state);
   particleTool.disabled=$('particleDetect').disabled=$('particleEmptyDetect').disabled=$('particleNext').disabled=$('particleDetails').disabled=busy||!state;
   $('particleRemove').disabled=busy||!state||!(window.getSelectedPores?.().length);
   $('tsSteps').querySelectorAll('button').forEach(b=>b.disabled=busy||!state);
   $('particleEdit').querySelectorAll('input').forEach(r=>r.disabled=busy||!state);
   $('particleAxis').querySelectorAll('input').forEach(r=>r.disabled=busy||!state);
   $('particleWidthMode').querySelectorAll('input').forEach(r=>r.disabled=busy||!state);
-  $('tubeUndo').disabled=busy||!(tube.trace.length||particle.trace.length||inputHistory.length||state?.can_undo);
-  $('back').disabled=$('tubeUndo').disabled;
+  $('resultUndo').disabled=busy||!(particle.trace.length||inputHistory.length||state?.can_undo);
+  $('back').disabled=$('resultUndo').disabled;
 }
 
-function tubeSummary(t){
-  const f=v=>v==null?'—':v.toFixed(2)+' '+t.unit;
-  return [t.length!=null&&'T '+f(t.length),t.width!=null&&'D '+f(t.width)].filter(Boolean).join(', ');
-}
-// Say what was and was not measured: a tube can have no clean section for D, and a width-only spot can be unclean.
-function tubeNote(t,kind){
-  if(kind==='td'&&t.width==null)return ' No clean section for D; click a clean spot in Width only mode.';
-  if(kind==='d'&&t.clean===false)return ' This spot is not clean (neighbouring fibre or blurred edges); try another spot.';
-  return '';
-}
-// Save a trace-tube or measure-tube response the same way for clicks, strokes and boxes.
-async function tubeCommit(result,kind,verb){
-  if(!result?.tube)throw new Error('No measurement came back. Try again, or click both ends instead.');
-  const id=result.object_id;
-  if(id!=null){tubeIds.add(id);tubeFresh=id}
-  await accept(result);renderMeasurements(await measurementSnapshot());
-  setStatus(`${verb} ${id!=null?'object #'+id:'the tube'}: ${tubeSummary(result.tube)}.${tubeNote(result.tube,kind)} Ctrl+Z to undo.`);
-}
-async function tubeRun(){
-  const points=tube.trace,kind=tubeKind,manual=tubeManual();tube.trace=[];tube.cursor=null;tubeUpdate();
-  await work(kind==='d'?'Measuring width…':manual?'Saving line…':'Tracing tube…',async()=>{
-    await tubeCommit(await api('trace-tube',{...payload(),points,kind,...(manual?{manual:true}:{})}),kind,kind==='d'?'Measured':manual?'Drew':'Traced');
-  });
-}
-// The sent stroke or box stays on the image (dimmed) while the request runs.
-async function tubeSend(sent,message,request){
-  tube.sent=sent;draw();
-  try{await work(message,request)}finally{tube.sent=null;draw()}
-}
-async function tubeEdges(point){
-  const edge=tube.trace.slice(0,2);tube.trace=[];tube.cursor=null;tubeUpdate();
-  await work('Measuring width…',async()=>tubeCommit(await api('measure-tube',{...payload(),edge,point}),'d','Measured width of'));
-}
-function tubeBox([a,b]){
-  const box=[Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];
-  return tubeSend({button:2,points:[a,b]},'Measuring width…',async()=>tubeCommit(await api('measure-tube',{...payload(),box}),'d','Measured width of'));
-}
-async function tubeSam(point){
-  await work('Segmenting with SAM 2.1…',async()=>{
-    const known=new Set(state.candidates.map(c=>c.candidate_id));
-    const segment=await api('quick-segment',{...payload(),points:[point],labels:[1],target_id:null});
-    const applied=await api('apply',{...payload(),token:segment.token,choice:0,target_id:segment.target_id});
-    const id=segment.target_id??applied.candidates.find(c=>!known.has(c.candidate_id))?.candidate_id;
-    await accept(applied);
-    if(id===undefined||id===null)throw new Error('SAM found no object here.');
-    const result=await api('measure-tube',{...payload(),object_id:id});
-    tubeIds.add(id);tubeFresh=id;
-    await accept(result);renderMeasurements(await measurementSnapshot());
-    setStatus(`Measured object #${id} from its SAM mask: ${tubeSummary(result.tube)}. Press Ctrl+Z twice to remove it.`);
-  });
-}
 // Shift while drawing a line: the new end snaps to the nearest 45° (horizontal, vertical or diagonal) from the previous point.
 function snapAngle(from,to,shift){
   if(!shift||!from||!to)return to;
@@ -724,48 +608,16 @@ function snapAngle(from,to,shift){
   const d=(to[0]-from[0])*c+(to[1]-from[1])*s;
   return [from[0]+d*c,from[1]+d*s];
 }
-const tubePointer=window.handleLabPointer;
-window.handleLabPointer=function(event){
-  if(mode!=='tube'||labMode!=='report')return tubePointer(event);
-  canvas.focus();
-  const point=eventPoint(event);
-  if(event.ctrlKey&&tubeKind==='td'){tubeSam(point);return true}
-  if(tubeKind==='d'&&!tubeManual()){tube.trace=[point];tubeRun();return true}
-  if(tubeEdgeMode()&&!tube.trace.length){tubeGestureStart(event,point);return true} // first edge: drag and release draws it (a click starts it point by point)
-  tubeClick(point,event.shiftKey);
-  return true;
-};
-function tubeClick(point,shift){
-  if(tubeEdgeMode()){
-    if(tube.trace.length<2){tube.trace.push(snapAngle(tube.trace[0],point,shift));return tubeUpdate()}
-    return tubeEdges(point);
-  }
-  if(tubeManual()){
-    point=snapAngle(tube.trace.at(-1),point,shift);
-    const last=tube.trace.at(-1),k=canvas.width/(canvas.getBoundingClientRect().width||canvas.width);
-    if(last&&tube.trace.length>=2&&Math.hypot(point[0]-last[0],point[1]-last[1])<=6*k)return tubeRun(); // the last point again finishes
-    if(tube.trace.length<MANUAL_MAX)tube.trace.push(point);
-    return tube.trace.length>=MANUAL_MAX?tubeRun():tubeUpdate();
-  }
-  if(tube.trace.length<TUBE_STYLE.max)tube.trace.push(point);
-  if(!shift&&tube.trace.length>=2||tube.trace.length>=TUBE_STYLE.max)tubeRun();else tubeUpdate();
-}
-function tubeGestureStart(event,point){
+function gestureStart(event,point){
   gesture={button:event.button,id:event.pointerId,x:event.clientX,y:event.clientY,shift:event.shiftKey,moved:false,points:[point]};
   try{canvas.setPointerCapture(event.pointerId)}catch{/* synthetic events have no active pointer */}
 }
-function tubeGestureEnd(){
+function gestureEnd(){
   const g=gesture;gesture=null;
-  if(g?.button===2)tubeMenuHold=performance.now(); // Windows sends contextmenu after the right button is released
   try{if(g&&canvas.hasPointerCapture(g.id))canvas.releasePointerCapture(g.id)}catch{/* already released */}
   labStrip();draw();
   return g;
 }
-const tubeActive=()=>mode==='tube'&&labMode==='report';
-canvas.addEventListener('pointerdown',event=>{
-  if(event.button!==2||!tubeActive()||busy||!state||gesture)return;
-  canvas.focus();tubeGestureStart(event,eventPoint(event));
-});
 canvas.addEventListener('pointermove',event=>{
   const g=gesture;if(!g||event.pointerId!==g.id)return;
   if(!g.moved){
@@ -774,109 +626,43 @@ canvas.addEventListener('pointermove',event=>{
     labStrip();
   }
   g.points[1]=g.button===0?snapAngle(g.points[0],eventPoint(event),event.shiftKey):eventPoint(event);
-  if(!tubeFrame)tubeFrame=requestAnimationFrame(()=>{tubeFrame=0;draw()});
+  if(!drawFrame)drawFrame=requestAnimationFrame(()=>{drawFrame=0;draw()});
 });
 canvas.addEventListener('pointerup',event=>{
   if(!gesture||event.pointerId!==gesture.id)return;
-  const g=tubeGestureEnd(),p=g.button===0?snapAngle(g.points[0],eventPoint(event),event.shiftKey):eventPoint(event);
-  if(particleActive()&&!busy&&state)return particleRelease(g,p);
-  if(!tubeActive()||busy||!state)return;
-  if(g.button===0){if(g.moved){tube.trace=[g.points[0],p];tubeUpdate()}else tubeClick(g.points[0],false);return}
-  if(g.moved)tubeBox([g.points[0],p]); // a right press-release does nothing
+  const g=gestureEnd(),p=g.button===0?snapAngle(g.points[0],eventPoint(event),event.shiftKey):eventPoint(event);
+  if(particleActive()&&!busy&&state)particleRelease(g,p);
 });
-for(const type of ['pointercancel','lostpointercapture'])canvas.addEventListener(type,event=>{if(gesture&&event.pointerId===gesture.id)tubeGestureEnd()}); // never leave a drag stuck
-window.addEventListener('blur',()=>{if(gesture)tubeGestureEnd()});
+for(const type of ['pointercancel','lostpointercapture'])canvas.addEventListener(type,event=>{if(gesture&&event.pointerId===gesture.id)gestureEnd()}); // never leave a drag stuck
+window.addEventListener('blur',()=>{if(gesture)gestureEnd()});
 document.addEventListener('keydown',event=>{
   if(event.key!=='Escape'||!gesture)return;
-  event.preventDefault();event.stopImmediatePropagation();tubeGestureEnd();
+  event.preventDefault();event.stopImmediatePropagation();gestureEnd();
 },true);
-document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{if(gesture)tubeGestureEnd()}));
-// A right drag released off the canvas must not open the browser menu either.
-window.addEventListener('contextmenu',event=>{if(tubeActive()&&(gesture||event.target===canvas||performance.now()-tubeMenuHold<500))event.preventDefault()},true);
-document.addEventListener('keydown',event=>{
-  if(mode!=='tube'||!tube.trace.length||busy||!state||event.altKey||event.isComposing)return;
-  if($('editorPanel').classList.contains('hidden')||document.querySelector('dialog[open]'))return;
-  if(event.target.closest?.('input,textarea,select')||event.target.isContentEditable)return;
-  // Ctrl+Z removes the pending point first (capture phase, before the global saved-edit undo).
-  if((event.ctrlKey||event.metaKey)&&!event.shiftKey&&event.code==='KeyZ'){event.preventDefault();event.stopImmediatePropagation();tube.trace.pop();tubeUpdate();return}
-  if(event.ctrlKey||event.metaKey)return;
-  if(event.key==='Enter'&&tube.trace.length>=2&&!tubeEdgeMode()){event.preventDefault();tubeRun()}
-  else if(event.key==='Backspace'){event.preventDefault();tube.trace.pop();tubeUpdate()}
-  else if(event.key==='Escape')tubeCancel();
-},true);
-let tubeFrame=0;
-canvas.addEventListener('pointermove',event=>{
-  if(mode!=='tube'||labMode!=='report'||!tube.trace.length||busy)return;
-  tube.cursor=snapAngle(tube.trace.at(-1),eventPoint(event),event.shiftKey&&(tubeManual()||tubeEdgeMode()&&tube.trace.length===1));
-  if(!tubeFrame)tubeFrame=requestAnimationFrame(()=>{tubeFrame=0;draw()});
-});
-canvas.addEventListener('pointerleave',()=>{if(tube.cursor){tube.cursor=null;draw()}});
+document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>{if(gesture)gestureEnd()}));
+let drawFrame=0;
 
-// Live trace on the image: dark halo + cyan line, a rubber band to the cursor, numbered points. Sized in screen pixels.
-const tubeDraw=window.drawManualMeasurement;
-window.drawManualMeasurement=c=>{
-  tubeDraw?.(c);
-  if(labMode!=='report'||mode!=='tube')return;
-  const k=Math.max(.5,canvas.width/(canvas.getBoundingClientRect().width||canvas.width)),pts=tube.trace,tc=traceColor();
-  const line=(list,width,color,dash)=>{c.beginPath();list.forEach((p,i)=>i?c.lineTo(...p):c.moveTo(...p));c.setLineDash(dash.map(d=>d*k));c.lineWidth=width*k;c.strokeStyle=color;c.stroke()};
-  c.save();c.lineCap=c.lineJoin='round';
-  // Live stroke or width box (cyan on a dark halo, never the saved yellow); dimmed once sent.
-  const live=gesture?.moved?gesture:tube.sent;
-  if(live){
-    if(!gesture)c.globalAlpha=.6;
-    if(live.button===2&&live.points.length>1){
-      const [a,b]=live.points,r=[Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.abs(b[0]-a[0]),Math.abs(b[1]-a[1])];
-      c.fillStyle=tc;c.globalAlpha*=.14;c.fillRect(...r);c.globalAlpha=gesture?1:.6;
-      c.strokeStyle='rgba(6,8,12,.8)';c.lineWidth=4*k;c.setLineDash([]);c.strokeRect(...r);
-      c.strokeStyle=tc;c.lineWidth=1.8*k;c.setLineDash([6*k,4*k]);c.strokeRect(...r);
-    }else if(live.button===0&&live.points.length>1){line(live.points,4.5,'rgba(6,8,12,.8)',[]);line(live.points,2,'#ffff00',[])} // first edge line while dragging
-    c.globalAlpha=1;
-  }
-  if(!pts.length){c.restore();return}
-  const lc=tubeManual()?'#ffff00':tc; // a manual line is drawn as it will be saved: measurement yellow
-  if(pts.length>1){line(pts,4.5,'rgba(6,8,12,.8)',[]);line(pts,2,lc,[])}
-  if(tube.cursor&&tubeEdgeMode()&&pts.length===2){
-    const [a,b]=pts,L=Math.hypot(b[0]-a[0],b[1]-a[1])||1,n=[-(b[1]-a[1])/L,(b[0]-a[0])/L],d=(tube.cursor[0]-a[0])*n[0]+(tube.cursor[1]-a[1])*n[1];
-    const o=[[a[0]+d*n[0],a[1]+d*n[1]],[b[0]+d*n[0],b[1]+d*n[1]]],m=[(a[0]+b[0])/2,(a[1]+b[1])/2];
-    line(o,4.5,'rgba(6,8,12,.7)',[]);line(o,2,'#ffff00',[]);line([m,[m[0]+d*n[0],m[1]+d*n[1]]],1.5,'#ffff00',[2,3]);
-  }else if(tube.cursor){const band=[pts.at(-1),tube.cursor];line(band,4.5,'rgba(6,8,12,.7)',[]);line(band,1.8,'rgba(255,255,255,.9)',[6,5])}
-  c.setLineDash([]);c.font=`600 ${11*k}px "Segoe UI",system-ui,sans-serif`;c.textBaseline='middle';c.textAlign='center';
-  if(tubeManual()){ // manual: small vertex dots, no numbers
-    pts.forEach(p=>{c.beginPath();c.arc(p[0],p[1],3.5*k,0,Math.PI*2);c.fillStyle='rgba(6,8,12,.85)';c.fill();c.beginPath();c.arc(p[0],p[1],2.2*k,0,Math.PI*2);c.fillStyle=lc;c.fill()});
-    c.restore();return;
-  }
-  pts.forEach((p,i)=>{
-    const r=(i===0?6.5:5)*k;
-    c.beginPath();c.arc(p[0],p[1],r+1.5*k,0,Math.PI*2);c.fillStyle='rgba(6,8,12,.85)';c.fill();
-    c.beginPath();c.arc(p[0],p[1],r,0,Math.PI*2);c.fillStyle=i===0?'#fff':lc;c.fill();
-    c.fillStyle='#04121a';c.fillText(String(i+1),p[0],p[1]+.5*k);
-  });
-  c.restore();
-};
-
-// Results list (T#/D# match the labels drawn on the figure).
-function tubeRender(data){
+// Results list (#id matches the labels drawn on the figure).
+function resultRender(data){
   const unit=data.measurement_unit||'µm',rows=data.candidates.filter(r=>r.length_um!=null||r.width_um!=null).sort((a,b)=>b.candidate_id-a.candidate_id);
-  const tubeRow=r=>Boolean(r.tube||r.source==='cnt_trace'||r.source==='cnt_manual'||tubeIds.has(r.candidate_id)),anyTube=rows.some(tubeRow);
-  $('tubeCount').textContent=rows.length||'';$('tubeCount').dataset.n=rows.length;
-  $('tubeEmpty').hidden=$('particleEmpty').hidden=rows.length>0;$('tubeResults').hidden=!rows.length;$('tubeCalib').hidden=unit!=='px';
-  const head=(th,tag,label)=>{th.replaceChildren(...(anyTube?[el('span','chip chip-measure',tag)]:[]),`${label} (${unit})`)};
-  head($('tubeLenHead'),'T','Length');head($('tubeWidHead'),'D','Width');
+  $('resultCount').textContent=rows.length||'';$('resultCount').dataset.n=rows.length;
+  $('particleEmpty').hidden=rows.length>0;$('resultTable').hidden=!rows.length;$('resultCalib').hidden=unit!=='px';
+  $('resultLenHead').textContent=`Length (${unit})`;$('resultWidHead').textContent=`Width (${unit})`;
   const cell=value=>{const td=el('td');td.append(el('span',value==null?'none':'val',value==null?'—':value.toFixed(2)));if(value==null)td.setAttribute('aria-label','Not measured');return td};
   const body=rows.map(r=>{
-    const isTube=tubeRow(r),tr=el('tr'),id=r.candidate_id;
-    tr.dataset.id=id;tr.tabIndex=0;if(id===tubeFresh||tubeFresh?.has?.(id))tr.className='fresh';
-    const first=el('td');first.append(...(isTube?[r.length_um!=null&&'T'+id,r.width_um!=null&&'D'+id].filter(Boolean).map(t=>el('span','chip chip-measure',t)):[el('span','id-plain','#'+id)]));first.append(el('span','src',r.particle?PARTICLE_SRC[r.particle_source??r.particle.source]||'Particle':r.source==='cnt_trace'?'Ridge trace':r.source==='cnt_manual'?'Manual line':r.source==='cnt_spot'?'Width spot':r.tube?'SAM mask':'Manual path'));
-    const remove=el('button','icon-btn');remove.type='button';remove.title='Delete #'+id+' (Ctrl+Z restores it)';remove.setAttribute('aria-label',(isTube?'Delete tube ':r.particle?'Delete particle ':'Delete object ')+id);remove.innerHTML=svg(ICON.delete);
-    remove.onclick=e=>{e.stopPropagation();tubeDelete(id)};
+    const tr=el('tr'),id=r.candidate_id;
+    tr.dataset.id=id;tr.tabIndex=0;if(id===resultFresh||resultFresh?.has?.(id))tr.className='fresh';
+    const first=el('td');first.append(el('span','id-plain','#'+id),el('span','src',r.particle?PARTICLE_SRC[r.particle_source??r.particle.source]||'Particle':'Manual path'));
+    const remove=el('button','icon-btn');remove.type='button';remove.title='Delete #'+id+' (Ctrl+Z restores it)';remove.setAttribute('aria-label',(r.particle?'Delete particle ':'Delete object ')+id);remove.innerHTML=svg(ICON.delete);
+    remove.onclick=e=>{e.stopPropagation();resultDelete(id)};
     const last=el('td');last.append(remove);
     tr.append(first,cell(r.length_um),cell(r.width_um),last);
     const pick=()=>window.selectPoreFromDetails?.(id);
     tr.onclick=pick;tr.onkeydown=e=>{if(e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();pick()}};
     return tr;
   });
-  tubeFresh=null;
-  $('tubeRows').replaceChildren(...body);
+  resultFresh=null;
+  $('resultRows').replaceChildren(...body);
   const mean=key=>{
     const v=rows.map(r=>r[key]).filter(x=>x!=null),n=v.length;if(!n)return '—';
     const m=v.reduce((a,b)=>a+b,0)/n;
@@ -886,46 +672,46 @@ function tubeRender(data){
   const footCell=v=>v instanceof Element?v:el('td','',v);
   const count=key=>rows.filter(r=>r[key]!=null).length;
   const nl=count('length_um'),nw=count('width_um');
-  const foot=el('tr');foot.append(el('td','',`Mean ± SD (n = ${nl===nw||!nw?nl:!nl?nw:nl+(rows.some(r=>r.particle)?' L, ':' T, ')+nw+(rows.some(r=>r.particle)?' W':' D')})`),footCell(mean('length_um')),footCell(mean('width_um')),el('td'));
-  $('tubeFoot').replaceChildren(...(rows.length>1?[foot]:[]));
-  tubeSyncSelection();
+  const foot=el('tr');foot.append(el('td','',`Mean ± SD (n = ${nl===nw||!nw?nl:!nl?nw:nl+' L, '+nw+' W'})`),footCell(mean('length_um')),footCell(mean('width_um')),el('td'));
+  $('resultFoot').replaceChildren(...(rows.length>1?[foot]:[]));
+  resultSyncSelection();
 }
-function tubeSyncSelection(){
+function resultSyncSelection(){
   const selected=new Set(window.getSelectedPores?.()||[]);
-  $('tubeRows').querySelectorAll('tr').forEach(tr=>{const on=selected.has(Number(tr.dataset.id));tr.classList.toggle('selected',on);tr.setAttribute('aria-selected',String(on))});
+  $('resultRows').querySelectorAll('tr').forEach(tr=>{const on=selected.has(Number(tr.dataset.id));tr.classList.toggle('selected',on);tr.setAttribute('aria-selected',String(on))});
 }
-new MutationObserver(tubeSyncSelection).observe($('selectedPoreCount'),{childList:true,characterData:true,subtree:true});
-function tubeDelete(id){
+new MutationObserver(resultSyncSelection).observe($('selectedPoreCount'),{childList:true,characterData:true,subtree:true});
+function resultDelete(id){
   return work('Deleting #'+id+'…',async()=>{await accept(await api('delete',{...payload(),target_ids:[id]}));setStatus('Deleted #'+id+'. Ctrl+Z to undo.')});
 }
 const labRenderMeasurements=renderMeasurements;
 renderMeasurements=function(data){
   labRenderMeasurements(data);
-  if(labMode==='report'){tubeKey=data.dataset+':'+data.revision;tubeRender(data)}
+  if(labMode==='report'){resultKey=data.dataset+':'+data.revision;resultRender(data)}
 };
 // Undo, delete and manual edits change the list without calling renderMeasurements; refresh it quietly.
-function tubeSchedule(){
-  clearTimeout(tubeTimer);
-  tubeTimer=setTimeout(async()=>{
-    if(labMode!=='report'||!state||tubeKey===state.dataset+':'+state.revision)return;
+function resultSchedule(){
+  clearTimeout(resultTimer);
+  resultTimer=setTimeout(async()=>{
+    if(labMode!=='report'||!state||resultKey===state.dataset+':'+state.revision)return;
     try{renderMeasurements(await measurementSnapshot())}catch{/* superseded by a newer revision */}
   },250);
 }
-const tubeAccepted=window.onEditorAccepted;
+const resultAccepted=window.onEditorAccepted;
 window.onEditorAccepted=function(data){
-  if(data.dataset!==tube.dataset){tube={dataset:data.dataset,trace:[],cursor:null};particle.trace=[];particle.cursor=null;tubeIds.clear();tubeKey='';tubeUpdate()}
-  tubeAccepted?.(data);
-  labStrip();tubeSchedule();
+  if(data.dataset!==labDataset){labDataset=data.dataset;particle.trace=[];particle.cursor=null;resultKey=''}
+  resultAccepted?.(data);
+  labStrip();resultSchedule();
 };
 
-// Mirror errors into the Tubes panel (the status bar already shows them).
+// Mirror errors into the Particles panel (the status bar already shows them).
 const labStatusBase=setStatus;
 setStatus=function(text,error=false){
-  const hit=error&&labMode==='report'&&/^(?:[TD#](\d+) is already measured|This particle is already measured as #(\d+))\.?$/.exec(text),hitId=hit&&(hit[1]??hit[2]);
-  if(hit){text+=' It is now selected. Delete it to '+(hit[2]?'measure':'trace')+' again.';setTimeout(()=>{window.selectPoreFromDetails?.(Number(hitId));document.querySelector(`#tubeRows tr[data-id="${hitId}"]`)?.scrollIntoView({block:'nearest'})})} // after work() clears busy
+  const hit=error&&labMode==='report'&&/^This particle is already measured as #(\d+)\.?$/.exec(text),hitId=hit&&hit[1];
+  if(hit){text+=' It is now selected. Delete it to measure again.';setTimeout(()=>{window.selectPoreFromDetails?.(Number(hitId));document.querySelector(`#resultRows tr[data-id="${hitId}"]`)?.scrollIntoView({block:'nearest'})})} // after work() clears busy
   $('status').title='';labStatusBase(text,error); // a caller may add details as a tooltip after this
-  if(error&&(mode==='tube'||mode==='particle')&&labMode==='report'){$('tubeStatus').textContent=text;$('tubeStatus').classList.add('error')}
-  else if($('tubeStatus').classList.contains('error')){$('tubeStatus').textContent='';$('tubeStatus').classList.remove('error')}
+  if(error&&mode==='particle'&&labMode==='report'){$('resultStatus').textContent=text;$('resultStatus').classList.add('error')}
+  else if($('resultStatus').classList.contains('error')){$('resultStatus').textContent='';$('resultStatus').classList.remove('error')}
 };
 // ---- Particle tool: stage Select particles (raw image left, selected particles right) and stage Edit lines (one image; Select | Draw, Length | Width).
 // Edit lines draws every row's length_line / width_line itself, in two on-screen colours (--particle-length, --particle-width); saved figures stay yellow.
@@ -1000,9 +786,9 @@ function particleEnter(stage=particleStage){
   window.updateToolLayout?.();particleStageSet(stage);
 }
 particleTool.onclick=()=>{if(!busy)particleEnter()};
-// Particles sample: the rail keeps Select, Particle, Delete, Undo and Clear. Select and Delete work inside the particle stages
+// Report: the rail keeps Select, Particle, Delete, Undo and Clear. Select and Delete work inside the particle stages
 // instead of opening the generic segmentation view (where a line or a label cannot be clicked).
-const particleFlow=()=>labMode==='report'&&labSample==='particles';
+const particleFlow=()=>labMode==='report';
 function labRailSample(){
   for(const b of tools.querySelectorAll('[data-mode]'))if(!['select','particle','delete'].includes(b.dataset.mode))b.hidden=particleFlow();
   window.labFillScale=particleFlow()&&mode==='particle'&&particleStage==='lines'?.3:1;
@@ -1022,7 +808,7 @@ $('particleNext').onclick=()=>{if(busy||!state)return;if(particleStage!=='select
 $('particleDetails').onclick=()=>$('openPoreDetails').click();
 function particleSummary(p){const f=v=>v.toFixed(2)+' '+p.unit;return [p.length!=null&&'L '+f(p.length),p.width!=null&&'W '+f(p.width)].filter(Boolean).join(', ')}
 async function particleSave(result,fresh){
-  if(fresh!=null)tubeFresh=fresh;
+  if(fresh!=null)resultFresh=fresh;
   await accept(result);renderMeasurements(await measurementSnapshot());
 }
 // Short status; the reasons go in the status bar's tooltip.
@@ -1085,9 +871,10 @@ function particleDeleteSelected(){
   if(!axis)return particleRemoveSelected();
   if(busy)return;
   return work(`Deleting the ${axis} line…`,async()=>{
-    await particleSave(await api('particle-line',{...payload(),object_id:id,axis,points:null}));
+    const result=await api('particle-line',{...payload(),object_id:id,axis,points:null});
+    await particleSave(result);
     lineSel=null;particleAxisSet(axis); // ready to draw it again
-    setStatus(`Deleted ${axis} line of #${id}.`);
+    setStatus(result.removed?`Deleted #${id}: it had no other line. Ctrl+Z to undo.`:`Deleted ${axis} line of #${id}.`);
   });
 }
 $('particleRemove').onclick=()=>particleDeleteSelected();
@@ -1098,7 +885,7 @@ window.handleLabPointer=function(event){
   const point=eventPoint(event),first=particle.trace[0],toggle=event.shiftKey||event.ctrlKey||event.metaKey;
   if(particleStage==='select'){lineSel=null;window.pickPoreAtPoint?.(point,toggle,(window.getSelectedPores?.()||[]).length?null:particleAdd);return true} // with a selection, a click on nothing clears it first (PoreSAM)
   if(particleLineTool==='select'){const hit=!toggle&&particleLineAt(point);if(hit)particleSelectLine(hit);else{lineSel=null;window.pickPoreAtPoint?.(point,toggle)}return true}
-  if(!first){tubeGestureStart(event,point);return true} // press-drag-release draws the line; a click sets the first end
+  if(!first){gestureStart(event,point);return true} // press-drag-release draws the line; a click sets the first end
   const end=snapAngle(first,point,event.shiftKey);
   if(Math.hypot(end[0]-first[0],end[1]-first[1])>=1)particleLine([first,end]);
   return true;
@@ -1110,7 +897,7 @@ function particleRelease(g,p){
 canvas.addEventListener('pointermove',event=>{
   if(!particleActive()||!particle.trace.length||busy)return;
   particle.cursor=snapAngle(particle.trace[0],eventPoint(event),event.shiftKey);
-  if(!tubeFrame)tubeFrame=requestAnimationFrame(()=>{tubeFrame=0;draw()});
+  if(!drawFrame)drawFrame=requestAnimationFrame(()=>{drawFrame=0;draw()});
 });
 canvas.addEventListener('pointerleave',()=>{if(particle.cursor){particle.cursor=null;draw()}});
 document.addEventListener('keydown',event=>{
@@ -1176,4 +963,4 @@ window.drawManualMeasurement=c=>{
   c.restore();
 };
 labRailRender(null);window.labRailReady=true;labRailSample();
-tubeKindSet(tubeKind,false);tubeLineSet(tubeLine,false);particleEditSet('select');particleAxisSet('length');
+particleEditSet('select');particleAxisSet('length');

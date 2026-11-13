@@ -1,7 +1,6 @@
 // One inline-SVG icon set: 24-unit viewBox, stroke currentColor, width 1.75, round caps (docs/ui-design.md 4.12).
 window.LAB_ICON={
   select:'<path d="M6 4l11 7.5-5 1.2-2.4 5z"/>',
-  tube:'<circle cx="5" cy="18.5" r="2"/><circle cx="19" cy="5.5" r="2"/><path d="M6.8 17C10.5 15.5 9 11 12 11s2 3.5 5.2-4.6"/>',
   particle:'<path d="M4 13.5L8.5 5l8.5-.5 3.5 7.5-5.5 7.5-8.5-.5z"/><path d="M6.5 16.5l11-9M9.5 9l4.5 5.5"/>',
   positive:'<circle cx="12" cy="12" r="8" stroke-dasharray="3 2.6"/><path d="M12 8.5v7M8.5 12h7"/>',
   'prompt-positive':'<circle cx="10" cy="14.5" r="3.2"/><path d="M18 3.5v6M15 6.5h6"/>',

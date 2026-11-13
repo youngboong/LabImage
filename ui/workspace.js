@@ -76,19 +76,37 @@ function updateHistory(selected){
   else if(selected)$('dataset').add(new Option(datasetLabels[selected]??selected,selected));
   $('dataset').value=selected;
 }
+// Open analysis: one collapsible group per source folder (images without a known folder go last). Open/closed is remembered per PC.
+const libraryClosed=()=>{try{return new Set(JSON.parse(localStorage.getItem('labClosedFolders')||'[]'))}catch{return new Set()}};
+function libraryRemember(folder,open){const closed=libraryClosed();open?closed.delete(folder):closed.add(folder);try{localStorage.setItem('labClosedFolders',JSON.stringify([...closed]))}catch{}}
 function renderImageLibrary(){
   $('imageLibrary').replaceChildren();
-  for(const entry of imageLibrary.filter(entry=>entry.analyzed)){
+  const groups=new Map(),natural=(a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}); // 300x-2 before 300x-10
+  for(const entry of imageLibrary.filter(entry=>entry.analyzed).sort((a,b)=>natural(a.name,b.name))){const key=entry.folder||'';if(!groups.has(key))groups.set(key,[]);groups.get(key).push(entry)}
+  const closed=libraryClosed();
+  for(const folder of [...groups.keys()].sort((a,b)=>!a-!b||natural(a.split(/[\\/]/).pop(),b.split(/[\\/]/).pop()))){
+    const entries=groups.get(folder),group=document.createElement('details'),summary=document.createElement('summary'),cards=document.createElement('div');
+    group.className='library-folder';group.open=!closed.has(folder)||entries.some(e=>e.id===lastOpenedImage());
+    const title=document.createElement('strong');title.textContent=folder?folder.split(/[\\/]/).pop():'Other images';
+    const count=document.createElement('span');count.className='chip-count';count.textContent=entries.length;
+    summary.append(title,count);if(folder){const path=document.createElement('span');path.className='library-path';path.textContent=folder;summary.append(path);summary.title=folder}
+    group.ontoggle=()=>libraryRemember(folder,group.open);
+    cards.className='image-cards';group.append(summary,cards);$('imageLibrary').append(group);
+    for(const entry of entries)cards.append(libraryCard(entry));
+  }
+  if(!$('imageLibrary').children.length){const message=document.createElement('p');message.className='hint';message.textContent='No saved analyses yet. Open a new image to start.';const start=document.createElement('button');start.className='ghost';start.textContent='New image';start.onclick=()=>setLoadMode('new');const empty=document.createElement('div');empty.className='library-empty';empty.append(message,start);$('imageLibrary').append(empty)}
+  controls();
+}
+function libraryCard(entry){
+  {
     const card=document.createElement('button');card.className='image-card';card.dataset.imageId=entry.id;card.dataset.analyzed=String(entry.analyzed);
     const thumbnail=document.createElement('img');thumbnail.src=entry.preview_url;thumbnail.alt='';thumbnail.loading='lazy';
     const name=document.createElement('strong');name.textContent=entry.name;
     const action=document.createElement('span');action.className='image-action';action.textContent=entry.analyzed?'Open analysis':'Set up';
     if(entry.id===lastOpenedImage()){card.classList.add('last-opened');action.textContent='Open analysis · last opened'}
     card.append(thumbnail,name,action);card.onclick=()=>workspaceWork('Loading image…',async()=>selectImage(await api('open-image',{image_id:entry.id})));
-    $('imageLibrary').append(card);
+    return card;
   }
-  if(!$('imageLibrary').children.length){const message=document.createElement('p');message.className='hint';message.textContent='No saved analyses yet. Open a new image to start.';const start=document.createElement('button');start.className='ghost';start.textContent='New image';start.onclick=()=>setLoadMode('new');const empty=document.createElement('div');empty.className='library-empty';empty.append(message,start);$('imageLibrary').append(empty)}
-  controls();
 }
 async function selectImage(selection){
   if(selection.dataset){

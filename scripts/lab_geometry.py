@@ -241,32 +241,8 @@ def manual_geometry(annotation):
                 length_path=length, width_line=width, length_method='manual_path')
 
 
-TUBE_COLOR = '#ffff00'      # matches the hand-labelled CNT figures: pure yellow, 1 px aliased lines
-TUBE_FONT_RATIO = 21/16     # Arial 21 px at the default Text size 16 (cap height ~15 px)
-
-
-def tube_width_segments(line):
-    """Hand-label width style: two lines along the tube through the width ends, '+' at the middle."""
-    a, b = np.asarray(line[0], float), np.asarray(line[-1], float)
-    across = b-a
-    width = float(np.linalg.norm(across))
-    if width <= 0: return []
-    along = np.array([-across[1], across[0]])/width
-    half = max(12., width)  # each edge line is ~2x the width long
-    mid, arm = (a+b)/2, max(5., .3*width)
-    return [(end-along*half, end+along*half) for end in (a, b)] + [(mid-along*arm, mid+along*arm), (mid-across/width*arm, mid+across/width*arm)]
-
-
-def tube_edge_segments(edges):
-    """A D drawn as two parallel lines (hand-label style): both lines as drawn, a dotted connector between their middles, '+'."""
-    (a0, a1), (b0, b1) = (np.asarray(e, float) for e in edges)
-    m0, m1 = (a0+a1)/2, (b0+b1)/2
-    across = m1-m0; width = float(np.linalg.norm(across))
-    if width <= 0: return [(a0, a1), (b0, b1)]
-    u = across/width; along = np.array([-u[1], u[0]])
-    dots = [(m0+u*s, m0+u*min(s+2, width)) for s in np.arange(0, width, 5)]
-    mid, arm = (m0+m1)/2, max(5., .3*min(width, 30.))
-    return [(a0, a1), (b0, b1)] + dots + [(mid-along*arm, mid+along*arm), (mid-u*arm, mid+u*arm)]
+LINE_COLOR = '#ffff00'      # particle figures: pure yellow, 1 px aliased lines
+LINE_FONT_RATIO = 21/16     # Arial 21 px at the default Text size 16 (cap height ~15 px)
 
 
 def particle_segments(line, cap=9., touch=None):
@@ -306,12 +282,12 @@ def distance_to(raster):
     return cv2.distanceTransform((~raster).astype(np.uint8), cv2.DIST_L2, 3)
 
 
-def place_tube_label(size, own_segments, own_raster, others, foreign, blocked, boxes, anchor):
-    """Text box (x0, y0, ambiguous) for one tube label, or None.
+def place_line_label(size, own_segments, own_raster, others, foreign, blocked, boxes, anchor):
+    """Text box (x0, y0, ambiguous) for one particle line label, or None.
 
     Candidates sit beside the label's OWN line (both sides, ends, diagonals) at a small gap. A box must be inside the
     image and clear of every mask, drawn line (`others`) and placed label. It is unambiguous when the nearest line of
-    ANOTHER tube (`foreign`) is much farther than its own line; only without such a spot is the closest valid box used (the caller adds a leader line),
+    ANOTHER particle (`foreign`) is much farther than its own line; only without such a spot is the closest valid box used (the caller adds a leader line),
     and when no box near its own line is free at all, the closest free box anywhere. None only when the image has no free box."""
     from scipy import ndimage as ndi
     bh, bw = size
@@ -359,14 +335,14 @@ def place_tube_label(size, own_segments, own_raster, others, foreign, blocked, b
     return fallback
 
 
-def place_tube_labels(draw, font, tube_lines, union, occupied):
+def place_line_labels(draw, font, line_labels, union, occupied):
     """Place T#/D# labels beside their own lines: crowded objects first, a leader only when no unambiguous spot exists."""
     from PIL import ImageDraw
-    if not tube_lines: return
+    if not line_labels: return
     shape = union.shape
-    rasters = {key: raster_segments(segments, shape) for key, (segments, _, _) in tube_lines.items()}
+    rasters = {key: raster_segments(segments, shape) for key, (segments, _, _) in line_labels.items()}
     items = []
-    for key, (segments, text, anchor) in tube_lines.items():
+    for key, (segments, text, anchor) in line_labels.items():
         others, foreign = np.zeros(shape, bool), np.zeros(shape, bool)
         for other, raster in rasters.items():
             if other == key: continue
@@ -377,18 +353,18 @@ def place_tube_labels(draw, font, tube_lines, union, occupied):
         items.append((crowd, key, segments, text, anchor, bounds, others, foreign))
     for crowd, key, segments, text, anchor, bounds, others, foreign in sorted(items, key=lambda i: (i[0], i[1])):
         bw, bh = bounds[2]-bounds[0]+2*LABEL_PAD, bounds[3]-bounds[1]+2*LABEL_PAD
-        found = place_tube_label((bh, bw), segments, rasters[key], others, foreign, union, occupied, anchor)
+        found = place_line_label((bh, bw), segments, rasters[key], others, foreign, union, occupied, anchor)
         if found is None:
             raise ValueError('No space outside the object for measurement text. Reduce Text size or hide IDs.')
         x0, y0, ambiguous = found
         occupied.append((x0, y0, x0+bw, y0+bh))
-        draw.text((x0+LABEL_PAD-bounds[0], y0+LABEL_PAD-bounds[1]), text, fill=TUBE_COLOR, font=font)
+        draw.text((x0+LABEL_PAD-bounds[0], y0+LABEL_PAD-bounds[1]), text, fill=LINE_COLOR, font=font)
         if ambiguous:  # no spot is clearly closer to its own line than to a foreign one: tie the label to its line
             samples = np.vstack([p+(q-p)*np.linspace(0, 1, max(2, int(np.linalg.norm(q-p)/2)))[:, None] for p, q in segments])
             inner = np.array([[x0+LABEL_PAD, y0+LABEL_PAD], [x0+bw-LABEL_PAD, y0+bh-LABEL_PAD]], float)
             edge = np.clip(samples, inner[0], inner[1])
             nearest = int(np.argmin(np.linalg.norm(samples-edge, axis=1)))
-            draw.line([tuple(edge[nearest]), tuple(samples[nearest])], fill=TUBE_COLOR, width=1)
+            draw.line([tuple(edge[nearest]), tuple(samples[nearest])], fill=LINE_COLOR, width=1)
 
 
 def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show_ids=True, font_size=16):
@@ -397,24 +373,23 @@ def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show
     from pathlib import Path
     pixels = state.get('rgb', np.repeat(state['gray'][:, :, None], 3, axis=2)).copy()
     annotations = state.get('annotations', {})
-    is_tube = lambda identifier: 'tube' in annotations.get(str(identifier), {}) or 'particle' in annotations.get(str(identifier), {})   # no fill, no outline
     for identifier, mask in state['masks'].items():
-        if is_tube(identifier): continue  # tube figures match the hand-labelled style: no fill, no outline
+        if 'particle' in annotations.get(str(identifier), {}): continue  # particle figures: no fill, no outline
         pixels[mask] = np.rint((1-opacity)*pixels[mask]+opacity*np.array([255, 215, 0])).astype(np.uint8)
         contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(pixels, contours, -1, (255, 215, 0), 1)
     figure = Image.fromarray(pixels); draw = ImageDraw.Draw(figure)
     font_path = Path('C:/Windows/Fonts/arial.ttf')
     font = ImageFont.truetype(str(font_path), int(font_size)) if font_path.exists() else ImageFont.load_default()
-    tube_font = ImageFont.truetype(str(font_path), int(round(font_size*TUBE_FONT_RATIO))) if font_path.exists() else font
+    line_font = ImageFont.truetype(str(font_path), int(round(font_size*LINE_FONT_RATIO))) if font_path.exists() else font
     scale = state['report']['scale']['um_per_pixel']
     unit = state['report'].get('measurement_unit', 'µm')
     cache = state.setdefault('geometry_cache', {})
-    occupied, tube_lines = [], {}
+    occupied, line_labels = [], {}
     union = np.zeros(state['gray'].shape, np.uint8)
     for mask in state['masks'].values(): union |= mask.astype(np.uint8)
-    def label(text, anchor, mask, tube=False):
-        f, stroke = (tube_font, 0) if tube else (font, 1)
+    def label(text, anchor, mask):
+        f, stroke = font, 1
         bounds = draw.textbbox((0, 0), text, font=f, stroke_width=stroke)
         width, height = bounds[2]-bounds[0], bounds[3]-bounds[1]
         # Search empty rectangles, not just a label's center: every glyph must
@@ -438,9 +413,6 @@ def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show
         x, y, box = chosen
         occupied.append(box)
         # Fine leader connects the outside value to its own measurement path.
-        if tube:  # hand-label style: plain yellow text, no leader, no outline
-            draw.text((x-bounds[0], y-bounds[1]), text, fill=TUBE_COLOR, font=f)
-            return
         target = (max(x, min(anchor[0], x+width)), max(y, min(anchor[1], y+height)))
         draw.line([tuple(anchor), target], fill='#bfae35', width=1)
         draw.text((x-bounds[0], y-bounds[1]), text, fill='#ffed00', font=font,
@@ -454,22 +426,19 @@ def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show
             if g is None: g = cache[key] = centered_geometry(mask)
             g = report_geometry(mask, state.get('annotations', {}).get(str(identifier), {}), g)
         elif g is None: g = cache[key] = geometry(mask)
-        tube = is_tube(identifier)
         lines = []
         if show_length and len(g['length_path']) > 1:
-            lines.append((g['length_path'], g['length_pixels'], .35, f'T{identifier}=' if tube and not particle else '', False))
+            lines.append((g['length_path'], g['length_pixels'], .35, False))
         if show_width and len(g['width_line']) > 1:
-            lines.append((g['width_line'], g['width_pixels'], .65, f'D{identifier}=' if tube and not particle else '', True))
-        for line, value, fraction, prefix, is_width in lines:
+            lines.append((g['width_line'], g['width_pixels'], .65, True))
+        for line, value, fraction, is_width in lines:
             path = np.asarray(line, dtype=float)
-            if tube:
-                edges = state.get('annotations', {}).get(str(identifier), {}).get('width_edges')
-                segments = particle_segments(path, touch=state.get('annotations', {}).get(str(identifier), {}).get('particle', {}).get('width_touch') if is_width else None) if particle else (tube_edge_segments(edges) if edges else tube_width_segments(path)) if is_width else list(zip(path[:-1], path[1:]))
-                for p, q in segments: draw.line([tuple(p), tuple(q)], fill=TUBE_COLOR, width=1)
+            if particle:
+                segments = particle_segments(path, touch=annotations[str(identifier)]['particle'].get('width_touch') if is_width else None)
+                for p, q in segments: draw.line([tuple(p), tuple(q)], fill=LINE_COLOR, width=1)
                 if segments and np.isfinite(value):
-                    arc = np.r_[0., np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]
-                    anchor = (path[0]+path[-1])/2 if is_width or particle else [np.interp(arc[-1]*fraction, arc, path[:, k]) for k in (0, 1)]
-                    tube_lines[(identifier, 'D' if is_width else 'T')] = (segments, f'{prefix}{value*scale:.2f} {unit}', np.asarray(anchor, float))
+                    anchor = (path[0]+path[-1])/2
+                    line_labels[(identifier, 'D' if is_width else 'T')] = (segments, f'{value*scale:.2f} {unit}', np.asarray(anchor, float))
                 continue
             draw.line([tuple(p) for p in line], fill='#ffed00', width=2)
             # End caps follow each endpoint's local tangent, including curves.
@@ -481,10 +450,7 @@ def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show
                     if norm > 1e-8:
                         normal = np.array([-tangent[1], tangent[0]])/norm
                         reaches = []
-                        if tube:
-                            # Measured on the whole tube, so the (possibly carved) mask must not size the caps.
-                            reaches = [max(cap, .6*value) if is_width else cap]*2
-                        for sign in (() if tube else (-1, 1)):
+                        for sign in (-1, 1):
                             distance = 0.
                             for step in np.arange(.5, np.hypot(*mask.shape)+1, .5):
                                 x, y = np.floor(end+sign*step*normal+.5).astype(int)
@@ -496,12 +462,12 @@ def measured_overlay(state, opacity=.18, show_length=True, show_width=True, show
             if np.isfinite(value):
                 arc = np.r_[0., np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]
                 anchor = [np.interp(arc[-1]*fraction, arc, path[:, k]) for k in (0, 1)]
-                label(f'{prefix}{value*scale:.2f} {unit}', anchor, mask)
-        if 'center_point' in g and (show_length or show_width) and not tube:
+                label(f'{value*scale:.2f} {unit}', anchor, mask)
+        if 'center_point' in g and (show_length or show_width) and not particle:
             cx, cy = g['center_point']
             draw.ellipse((cx-3, cy-3, cx+3, cy+3), fill='#ffed00', outline='#161616')
         yy, xx = np.nonzero(mask)
         x, y = float(xx.mean()), float(yy.mean())
-        if show_ids and not (tube and (show_length or show_width)): label(f'#{identifier}', (x, y), mask)
-    place_tube_labels(draw, tube_font, tube_lines, union.astype(bool), occupied)
+        if show_ids and not (particle and (show_length or show_width)): label(f'#{identifier}', (x, y), mask)
+    place_line_labels(draw, line_font, line_labels, union.astype(bool), occupied)
     return figure

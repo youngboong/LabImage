@@ -132,7 +132,7 @@
   }
   function fit(){
     if(!base||!right.clientWidth||!right.clientHeight)return;
-    const ratio=Math.min((Math.min(left.clientWidth||Infinity,right.clientWidth)-18)/canvas.width,(Math.min(left.clientHeight||Infinity,right.clientHeight)-18)/canvas.height,1); // the Original pane may be hidden (Tube tool)
+    const ratio=Math.min((Math.min(left.clientWidth||Infinity,right.clientWidth)-18)/canvas.width,(Math.min(left.clientHeight||Infinity,right.clientHeight)-18)/canvas.height,1); // the Original pane may be hidden (Edit lines)
     $('zoom').value=Math.max(10,Math.floor(ratio*100));applyZoom();
   }
   window.resizeComparison=()=>{if(autoFit)fit();else applyZoom()};
