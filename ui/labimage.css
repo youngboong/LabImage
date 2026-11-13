@@ -21,8 +21,7 @@ body:not(.lab-advanced) [data-mode="ellipse"],body:not(.lab-advanced) [data-mode
 .home-art .well{fill:var(--well)}
 .home-art .obj{fill:rgba(255,215,0,.28);stroke:#ffd700;stroke-width:1.5} /* default object overlay color, a data color */
 .home-art .id{fill:#fff;font:600 8px var(--font-mono)}
-.home-art .fiber{stroke:#9a9a9a;stroke-width:6}
-.home-art .fiber.thin{stroke:#7a7a7a;stroke-width:4}
+.home-art .grain{fill:#8a8a8a;stroke:none}
 .home-art .m{stroke:var(--measure);stroke-width:1.75}
 .home-art .end{fill:var(--measure);stroke:var(--measure-ink);stroke-width:1}
 .home-art .chipbox{fill:var(--measure);stroke:var(--measure-edge);stroke-width:1}

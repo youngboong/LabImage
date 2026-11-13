@@ -26,15 +26,24 @@ def tube_annotation(c, kind='td'):
                   width_station=c['width_station'] if 'd' in kind else None))
 
 
-def particle_annotation(measure, source, features=None, warning=None):
+WIDTH_METHODS = dict(min='auto_feret_min', perpendicular='auto_feret_perpendicular')
+
+
+def particle_annotation(measure, source, features=None, warning=None, width='min'):
     """Maximum Feret length + minimum Feret width of one flake; the lines feed the same table/CSV path as a tube's manual lines."""
     lines = dict(length=measure.get('length_line'), width=measure.get('width_line'))
     present = {k: v for k, v in lines.items() if v is not None}
     return dict(source=f'particle_{source}', supplemental=True, review_status='user_accepted', manual_measurements=present,
-        measurement_methods={k: 'manual_line' if source == 'manual' else 'auto_feret' if k == 'length' else 'auto_feret_min' for k in present},
+        measurement_methods={k: 'manual_line' if source == 'manual' else 'auto_feret' if k == 'length' else WIDTH_METHODS[width] for k in present},
         particle=dict(length_line=lines['length'], width_line=lines['width'], length_px=measure.get('length_px'), width_px=measure.get('width_px'),
                       width_caliper_px=measure.get('width_caliper_px'), width_chord_px=measure.get('width_chord_px'), width_touch=measure.get('width_touch'),
                       source=source, features=features or {}, warning=warning))
+
+
+def image_scale(state):
+    """µm per pixel of the image itself, for detection sizes. Reported lengths use scale['um_per_pixel'], which includes the correction factor."""
+    scale = state['report']['scale']
+    return scale.get('image_um_per_pixel', scale['um_per_pixel'])
 
 
 def segments_cross(a, b, c, d):
@@ -51,7 +60,36 @@ class LabEditor(Editor):
         result = super().measurements(state)
         result['measurement_unit'] = state['report'].get('measurement_unit', 'µm')
         result['stats']['measurement_unit'] = result['measurement_unit']
+        result['particle_width_mode'] = self.width_mode(state)
         return result
+
+    def width_mode(self, state):
+        """'perpendicular' while any automatic width line of this analysis is the old one (perpendicular to the length), else 'min'."""
+        return 'perpendicular' if any(a.get('measurement_methods', {}).get('width') == WIDTH_METHODS['perpendicular'] for a in state['annotations'].values() if 'particle' in a) else 'min'
+
+    def particle_width_mode(self, state, payload):
+        """Switch every automatic width line between minimum Feret and the Feret perpendicular to the length. Hand-drawn width lines stay. One revision (one undo)."""
+        self.particle_mode(state)
+        mode = payload.get('mode')
+        if mode not in WIDTH_METHODS: raise ValueError('Choose Minimum or Perpendicular.')
+        annotations, changed = self.width_annotations(state, mode)
+        if not changed: raise ValueError('No automatic width line to change.')
+        result = self.save(state, dict(state['masks']), annotations, list(state['history'])+[state['revision']], state['next_id'], dict(type='particle-width-mode', mode=mode, object_ids=changed))
+        result.update(object_ids=changed, mode=mode)
+        return result
+
+    def width_annotations(self, state, mode):
+        """(annotations, changed ids): a copy in which every automatic width line is measured as `mode`. Hand-drawn width lines are the same in both."""
+        from particle_detect import feret_measure
+        annotations, changed = copy.deepcopy(state['annotations']), []
+        for i in self.particle_objects(state):
+            a = annotations[str(i)]
+            if a.get('measurement_methods', {}).get('width') not in WIDTH_METHODS.values() or a['measurement_methods']['width'] == WIDTH_METHODS[mode]: continue
+            f = feret_measure(state['masks'][i], mode)
+            a['manual_measurements']['width'] = f['width_line']; a['measurement_methods']['width'] = WIDTH_METHODS[mode]
+            a['particle'].update(width_line=f['width_line'], width_px=f['width_px'], width_caliper_px=f['width_caliper_px'], width_touch=f['width_touch'])
+            changed.append(i)
+        return annotations, changed
 
     def state(self, dataset):
         state = super().state(dataset)
@@ -140,7 +178,7 @@ class LabEditor(Editor):
             raise ValueError('Tubes are available in report mode.')
         if 'tube_cache' not in state:  # gray never changes within a dataset, so this survives revisions and undo
             from cnt_detect import centerline_map, ridge_response
-            state['tube_cache'] = ridge_response(state['gray'], state['report']['scale']['um_per_pixel'],
+            state['tube_cache'] = ridge_response(state['gray'], image_scale(state),
                 state['report'].get('measurement_unit', 'µm') != 'px')
             state['tube_cache']['P'] = centerline_map(state['gray'])  # None without the model file
         return state['tube_cache']
@@ -301,8 +339,9 @@ class LabEditor(Editor):
         return [i for i in state['masks'] if 'particle' in state['annotations'].get(str(i), {})]
 
     def particle_mode(self, state):
+        """The image scale for detection sizes (without the correction factor)."""
         if state['report'].get('workspace_mode') != 'report': raise ValueError('Particles are available in report mode.')
-        return state['report']['scale']['um_per_pixel']
+        return image_scale(state)
 
     def free_mask(self, state, mask):
         occupied = np.zeros(mask.shape, bool)
@@ -341,7 +380,8 @@ class LabEditor(Editor):
         """Every SAM mask that passes the particle rules becomes one measured object, all in one revision (one undo)."""
         from particle_detect import FEATURE_KEYS, detect_particles
         ump = self.particle_mode(state)
-        kept, excluded = detect_particles(state['gray'], self.automatic_masks(state), ump)
+        width = self.width_mode(state)   # a new detection follows the lines already there
+        kept, excluded = detect_particles(state['gray'], self.automatic_masks(state), ump, width)
         existing, items = list(state['masks'].values()), []
         occupied = np.zeros(state['gray'].shape, bool)
         for m in existing: occupied |= m
@@ -349,7 +389,7 @@ class LabEditor(Editor):
             m = p['mask']
             if (m & occupied).sum() > .5*m.sum() or any((m & e).sum() > .5*e.sum() for e in existing): continue   # already measured
             fresh = m & ~occupied
-            items.append((fresh, particle_annotation(p['feret'], 'auto', {k: round(p[k], 3) for k in FEATURE_KEYS})))
+            items.append((fresh, particle_annotation(p['feret'], 'auto', {k: round(p[k], 3) for k in FEATURE_KEYS}, width=width)))
             occupied |= fresh
         if not items: raise ValueError('No measurable particle found. Click a particle or draw the lines by hand.')
         result, ids = self.add_particles(state, items, 'detect-particles')
@@ -373,9 +413,10 @@ class LabEditor(Editor):
         if fresh.sum() < 20:
             hit = max(state['masks'], key=lambda i: int((state['masks'][i] & mask).sum()), default=None)
             raise ValueError('This particle is already measured.' if hit is None else f'#{hit} already covers this particle.')
-        row = particle_features([mask], state['gray'], ump, [state['masks'][i] for i in self.particle_objects(state)])[0]
+        width = self.width_mode(state)
+        row = particle_features([mask], state['gray'], ump, [state['masks'][i] for i in self.particle_objects(state)], width)[0]
         warning = exclusion_reason(row)
-        result, ids = self.add_particles(state, [(fresh, particle_annotation(row['feret'], 'click', {k: round(row[k], 3) for k in FEATURE_KEYS if k in row}, warning))], 'measure-particle')
+        result, ids = self.add_particles(state, [(fresh, particle_annotation(row['feret'], 'click', {k: round(row[k], 3) for k in FEATURE_KEYS if k in row}, warning, width))], 'measure-particle')
         result.update(object_id=ids[0], warning=warning, particle=self.particle_values(state, state['annotations'][str(ids[0])]['particle']))
         return result
 
@@ -440,7 +481,8 @@ class LabEditor(Editor):
         return figure
 
     def save_labels(self, state, payload):
-        """Hand-label figures beside the original: <name>(2) with lengths (T#) only, <name>(3) with widths (D#) only; particles: plain values, label = object id."""
+        """Hand-label figures beside the original: <name>(2) with lengths (T#) only, <name>(3) with widths (D#) only; particles: plain values, label = object id.
+        Particles also get <name>(1): the minimum Feret widths. Their <name>(3) is the width perpendicular to the length. Both are saved whatever the Width toggle shows."""
         if not any('tube' in a or 'particle' in a for a in state['annotations'].values()): return dict(no_tubes=True)
         source = self.source_path(state)
         folder = payload.get('directory')
@@ -450,18 +492,25 @@ class LabEditor(Editor):
         if not folder.is_absolute() or not folder.is_dir(): raise ValueError('Choose an existing folder.')
         name = Path(state['report'].get('source_name', 'image'))   # original file name: only (2) / (3) is added, the extension stays
         stem, suffix = (source.stem, source.suffix) if source else (name.stem, name.suffix if name.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg') else '.png')
-        targets = [folder/f'{stem}(2){suffix}', folder/f'{stem}(3){suffix}']
-        tables = [folder/f'{stem}(2).csv', folder/f'{stem}(3).csv']   # T# lengths / D# widths, as on the figures
-        # Existing name(2) / name(3) files are replaced without asking: saving again after an edit is the normal case.
-        for target, (length, width) in zip(targets, ((True, False), (False, True))):
-            figure = self.label_figure(state, length, width, int(payload.get('font_size', 16)))
+        def view(mode):   # this analysis with every automatic width line measured as `mode`
+            other = dict(state, annotations=self.width_annotations(state, mode)[0]); other.pop('measurements', None)
+            return other
+        particles = any('particle' in a for a in state['annotations'].values())
+        # (tag, state to draw, length?, width?, CSV label prefix, row key, CSV column)
+        jobs = [('(2)', state, True, False, 'T', 'length_um', 'length'), ('(3)', view('perpendicular') if particles else state, False, True, 'D', 'width_um', 'width')]
+        if particles: jobs.insert(0, ('(1)', view('min'), False, True, 'D', 'width_um', 'min_feret_width'))
+        targets = [folder/f'{stem}{job[0]}{suffix}' for job in jobs]
+        tables = [folder/f'{stem}{job[0]}.csv' for job in jobs]   # T# lengths / D# widths, as on the figures
+        # Existing name(1) / name(2) / name(3) files are replaced without asking: saving again after an edit is the normal case.
+        for target, (_, shown, length, width, *_) in zip(targets, jobs):
+            figure = self.label_figure(shown, length, width, int(payload.get('font_size', 16)))
             partial = target.with_name('.'+target.name+'.partial')
             figure.save(partial, format={'.tif': 'TIFF', '.tiff': 'TIFF', '.jpg': 'JPEG', '.jpeg': 'JPEG'}.get(suffix.lower(), 'PNG'))
             replace_file(partial, target)
         import csv
         unit = state['report'].get('measurement_unit', 'µm')
-        rows = [r for r in self.measurements(state)['candidates'] if r.get('tube') or r.get('particle')]
-        for table, (prefix, key, name) in zip(tables, (('T', 'length_um', 'length'), ('D', 'width_um', 'width'))):
+        for table, (_, shown, _, _, prefix, key, name) in zip(tables, jobs):
+            rows = [r for r in self.measurements(shown)['candidates'] if r.get('tube') or r.get('particle')]
             partial = table.with_name('.'+table.name+'.partial')
             with open(partial, 'w', newline='', encoding='utf-8-sig') as out:   # utf-8-sig: Excel reads µm correctly
                 writer = csv.writer(out)
@@ -484,14 +533,14 @@ class LabEditor(Editor):
         try: return json.loads(f.read_text(encoding='utf-8'))
         except (OSError, ValueError): return {}
 
-    # --- Batch: every image of a folder -> calibrate from its file, detect particles, save name(2)/(3) + CSVs beside it.
+    # --- Batch: every image of a folder -> calibrate from its file, detect particles, save name(1)/(2)/(3) + CSVs beside it.
     def batch_start(self, payload):
         import re, threading
         folder = Path(str(payload.get('directory') or ''))
         if not folder.is_absolute() or not folder.is_dir(): raise ValueError('Choose an existing folder.')
         if getattr(self, 'batch', None) and self.batch['running']: raise ValueError('A batch is already running.')
         files = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in ('.tif', '.tiff', '.png', '.jpg', '.jpeg')
-                       and not re.search(r'\(\d+\)$', p.stem))   # name(2) / name(3) are results, not inputs
+                       and not re.search(r'\(\d+\)$', p.stem))   # name(1) / name(2) / name(3) are results, not inputs
         if not files: raise ValueError('No images in this folder.')
         self.batch = dict(running=True, stop=False, folder=str(folder), total=len(files), done=0, current=None, results=[])
         threading.Thread(target=self.batch_run, args=(files, payload.get('overwrite') is True), daemon=True).start()
@@ -511,8 +560,9 @@ class LabEditor(Editor):
             b['current'] = path.name
             row = dict(name=path.name)
             try:
-                if not overwrite and any(path.with_name(f'{path.stem}({n}){path.suffix}').exists() for n in (2, 3)):
-                    row.update(status='skipped', note='already has (2) or (3)')
+                # Done = name(1), name(2) and name(3) are all there. An image without (1) (results older than the minimum Feret width) is analysed again.
+                if not overwrite and all(path.with_name(f'{path.stem}({n}){path.suffix}').exists() for n in (1, 2, 3)):
+                    row.update(status='skipped', note='already has (1), (2) and (3)')
                 else: row.update(self.batch_one(path, overwrite))
             except Exception as error:   # one bad image must not stop the folder
                 row.update(status='failed', note=str(error))
@@ -529,7 +579,7 @@ class LabEditor(Editor):
         pixels = meta.get('length_pixels') or (c.get('scale_pixels') if c.get('calibrated') else None) or 100
         scale = meta.get('label_um') or (pixels*meta['um_per_pixel'] if meta else c.get('scale_um') if c.get('calibrated') else None)
         config = dict(analysis_bottom=c['analysis_bottom'], preprocessing_mode='adjustable', normalize_enabled=False, background_strength=0, blur_method='none',
-            blur_strength=0, scale_um=scale or 1, scale_pixels=pixels if scale else 1, min_contrast=0, min_area_pixels=1, points_per_side=16,
+            blur_strength=0, scale_um=scale or 1, scale_pixels=pixels if scale else 1, scale_factor=self.workflow.last_scale_factor(), min_contrast=0, min_area_pixels=1, points_per_side=16,
             scale_confirmed=True, workspace_mode='report', calibrated=bool(scale))
         job = self.workflow.start(project['id'], config)['job_id']
         while True:
@@ -636,7 +686,7 @@ def make_handler(editor):
             return super().do_GET()
 
         def do_POST(self):
-            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop','/api/update-check','/api/update-install'):
+            if self.path not in ('/api/quick-segment','/api/measurement-overlay','/api/manual-measurement','/api/trace-tube','/api/measure-tube','/api/detect-particles','/api/measure-particle','/api/particle-line','/api/particle-width-mode','/api/save-labels','/api/choose-image','/api/batch-particles','/api/batch-status','/api/batch-stop','/api/update-check','/api/update-install'):
                 return super().do_POST()
             if not self.valid_host() or self.headers.get('X-Object-Editor') != '1':
                 return self.send(403, dict(error='Local access only'))
@@ -688,6 +738,8 @@ def make_handler(editor):
                         result = editor.measure_particle(state, payload)
                     elif self.path == '/api/particle-line':
                         result = editor.particle_line(state, payload)
+                    elif self.path == '/api/particle-width-mode':
+                        result = editor.particle_width_mode(state, payload)
                     elif self.path == '/api/save-labels':
                         result = editor.save_labels(state, payload)
                     elif self.path == '/api/quick-segment':

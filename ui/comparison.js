@@ -126,7 +126,7 @@
   };
   function applyZoom(){
     const zoom=Number($('zoom').value)/100;
-    for(const c of [canvas,original]){c.style.width=(canvas.width*zoom)+'px';c.style.height=(canvas.height*zoom)+'px';}
+    for(const c of [canvas,original]){c.style.width=(canvas.width*zoom)+'px';c.style.height=(canvas.height*zoom)+'px';c.style.imageRendering=zoom>2?'pixelated':''}
     $('zoomLabel').textContent=$('zoom').value+'%';
     updateCursor();
   }

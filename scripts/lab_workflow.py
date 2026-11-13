@@ -29,11 +29,17 @@ def tescan_header(path):
 
 
 class LabWorkflow(ProjectWorkflow):
+    # Calibration correction factor: every length is multiplied by it (areas by its square). The last one used is the default for new images.
+    def last_scale_factor(self):
+        try: value = float(json.loads((self.root/'scale_factor.json').read_text(encoding='utf-8'))['scale_factor'])
+        except (OSError, ValueError, KeyError, TypeError): return 1.
+        return value if .01 <= value <= 100 else 1.
+
     def upload(self, name, content, seed=None):
         result = super().upload(name, content, seed)
         project = self.projects[result['id']]
         if not seed:
-            project['config'].update(scale_um=project['config'].get('scale_um') if project.get('scale_metadata') else None,   # keep a scale read from the file
+            project['config'].update(scale_factor=self.last_scale_factor(), scale_um=project['config'].get('scale_um') if project.get('scale_metadata') else None,   # keep a scale read from the file
                 min_contrast=0, min_area_pixels=100, points_per_side=16,
                 preprocessing_mode='adjustable', normalize_enabled=False, background_strength=0,
                 blur_method='none', blur_strength=0)
@@ -97,7 +103,11 @@ class LabWorkflow(ProjectWorkflow):
         if not calibrated:
             prepared.update(scale_um=1., scale_pixels=1., scale_confirmed=True)
         values = super().validate_config(project, prepared)
-        values.update(workspace_mode=mode, calibrated=calibrated)
+        factor = payload.get('scale_factor', 1.) if calibrated else 1.
+        if isinstance(factor, bool) or not isinstance(factor, (int, float)) or not math.isfinite(factor) or not .01 <= factor <= 100:
+            raise ValueError('Correction factor must be a number from 0.01 to 100.')
+        values.update(workspace_mode=mode, calibrated=calibrated, scale_factor=float(factor))
+        if calibrated: (self.root/'scale_factor.json').write_text(json.dumps(dict(scale_factor=float(factor))), encoding='utf-8')
         return values
 
     def run(self, job_id, project, config, run_id, number):
@@ -162,7 +172,10 @@ class LabWorkflow(ProjectWorkflow):
                 np.savez_compressed(write_artifact(folder, 'entrance_candidates.npz'), **{f'candidate_{i}':m for i,m in masks.items()})
                 checkpoint = checkpoint_path().resolve()
                 report = dict(image=str(source), source_name=project['name'], analysis_bottom_exclusive=config['analysis_bottom'],
-                    scale=dict(label_um=config['scale_um'], length_pixels=config['scale_pixels'], um_per_pixel=config['scale_um']/config['scale_pixels'], label_source='user calibration' if config['calibrated'] else 'pixel units'),
+                    # um_per_pixel (every reported length) includes the correction factor; image_um_per_pixel (detection sizes) does not.
+                    scale=dict(label_um=config['scale_um'], length_pixels=config['scale_pixels'], um_per_pixel=config['scale_um']/config['scale_pixels']*config.get('scale_factor', 1.),
+                               image_um_per_pixel=config['scale_um']/config['scale_pixels'], scale_factor=config.get('scale_factor', 1.),
+                               label_source='user calibration' if config['calibrated'] else 'pixel units'),
                     measurement_unit='µm' if config['calibrated'] else 'px', workspace_mode=config['workspace_mode'],
                     rgb_image=str((source.parent/'display.png').resolve()), model='SAM 2.1 Small — official pretrained',
                     settings=settings, selection_settings=dict(method='general_sam_instances', min_area_pixels=config['min_area_pixels'], min_contrast=0),

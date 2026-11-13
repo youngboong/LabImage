@@ -166,11 +166,11 @@ body:not([data-tool=tube]) #tubeKind{display:none}
 body[data-tool=particle] #toolStrip{gap:var(--sp-4)}
 body[data-tool=particle] #toolStrip .ts-steps{flex:none}
 body[data-tool=particle] #tsName,#toolStrip :is(#particleEdit,#particleAxis) legend{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)} /* the rail and the radio labels already name them */
-#toolStrip :is(#particleEdit,#particleAxis,#particleDetect,#particleDetails,#particleRemove,#particleNext){flex:none;order:2}
+#toolStrip :is(#particleEdit,#particleAxis,#particleWidthMode,#particleDetect,#particleDetails,#particleRemove,#particleNext){flex:none;order:2}
 #toolStrip :is(#particleDetect,#particleEdit){margin-left:auto}
-body:not([data-tool=particle]) :is(#particleEdit,#particleAxis,#particleDetect,#particleDetails,#particleRemove,#particleNext,.particle-only){display:none}
+body:not([data-tool=particle]) :is(#particleEdit,#particleAxis,#particleWidthMode,#particleDetect,#particleDetails,#particleRemove,#particleNext,.particle-only){display:none}
 #particleRemove[hidden]{display:none}
-body:not([data-particle-stage=select]) :is(#particleDetect,#particleDetails),body:not([data-particle-stage=lines]) :is(#particleEdit,#particleAxis),body:not([data-particle-edit=draw]) #particleAxis{display:none}
+body:not([data-particle-stage=select]) :is(#particleDetect,#particleDetails),body:not([data-particle-stage=lines]) :is(#particleEdit,#particleAxis,#particleWidthMode),body:not([data-particle-edit=draw]) #particleAxis,body[data-particle-edit=draw] #particleWidthMode{display:none} /* Draw shows the axis radios instead: both do not fit a narrow window */
 body[data-tool=particle] :is(.tube-only,#tubeLine,#tubeEmpty,#manualPanel){display:none} /* one results panel; its copy follows the tool */
 #toolStrip .ts-stage{gap:var(--sp-3);min-height:var(--ctl-h-sm);margin:0 calc(-1 * var(--sp-3));padding:0 var(--sp-3);border-color:transparent;background:transparent;color:inherit;font:inherit}
 #toolStrip .ts-stage:hover:not(:disabled){background:var(--surface-hover);color:var(--text)}

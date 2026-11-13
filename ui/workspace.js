@@ -117,9 +117,9 @@ function drawSetup(){
   if(scalePoints.length===2){setupContext.beginPath();setupContext.moveTo(...scalePoints[0]);setupContext.lineTo(...scalePoints[1]);setupContext.stroke()}
 }
 function updateCalibration(){
-  const um=Number($('scaleUm').value),px=Number($('scalePixels').value),minimum=Number($('minArea').value);
+  const um=Number($('scaleUm').value),px=Number($('scalePixels').value),minimum=Number($('minArea').value),factor=Number($('scaleFactor').value)||1;
   const valid=um>0&&px>0;
-  $('calibrationInfo').textContent=valid?'1px = '+(um/px).toPrecision(5)+' µm, image area '+(setupProject.width*Number($('analysisBottom').value)*(um/px)**2).toLocaleString(undefined,{maximumFractionDigits:1})+' µm².':'Enter both scale lengths.';
+  $('calibrationInfo').textContent=valid?'1px = '+(um/px).toPrecision(5)+' µm'+(factor!==1?' × '+factor+' = '+(um/px*factor).toPrecision(5)+' µm':'')+', image area '+(setupProject.width*Number($('analysisBottom').value)*(um/px*factor)**2).toLocaleString(undefined,{maximumFractionDigits:1})+' µm².':'Enter both scale lengths.';
   $('minAreaInfo').textContent=valid?'Minimum area '+(minimum*(um/px)**2).toFixed(3)+' µm²':'';
 }
 async function showProject(project){
@@ -132,7 +132,7 @@ async function showProject(project){
   $('optionalProcessing').open=false;
   const c=project.config;
   $('analysisBottom').value=$('bottomSlider').value=c.analysis_bottom;
-  $('scaleUm').value=c.scale_um??'';$('scalePixels').value=c.scale_pixels??'';
+  $('scaleUm').value=c.scale_um??'';$('scalePixels').value=c.scale_pixels??'';$('scaleFactor').value=c.scale_factor??1;
   $('minContrast').value=c.min_contrast;$('minArea').value=c.min_area_pixels;$('pointDensity').value=c.points_per_side;
   const adjustable=c.preprocessing_mode==='adjustable';
   $('normalizeEnabled').checked=adjustable?c.normalize_enabled:['normalize','coarse'].includes(c.preprocessing_mode);$('backgroundStrength').value=adjustable?c.background_strength:({weak:4,medium:7,strong:10,detail:7}[c.coarse_strength]??0)*Number(['coarse','structure'].includes(c.preprocessing_mode));$('blurMethod').value=adjustable?c.blur_method:(['coarse','structure'].includes(c.preprocessing_mode)?'gaussian':'none');$('blurStrength').value=adjustable?c.blur_strength:3;invalidatePreprocessing();
@@ -159,6 +159,7 @@ $('uploadFile').onchange=()=>workspaceWork('Loading image…',async()=>{
 });
 async function prepareExisting(dataset){await showProject(await api('import-existing',{dataset}))}
 for(const id of ['analysisBottom','bottomSlider'])$(id).oninput=()=>{if(!setupProject)return;const value=$(id).value;$('analysisBottom').value=$('bottomSlider').value=value;updateCalibration();drawSetup();invalidatePreprocessing()};
+$('scaleFactor').oninput=()=>{if(setupProject)updateCalibration()};
 for(const id of ['scaleUm','scalePixels','minArea'])$(id).oninput=()=>{if(setupProject)updateCalibration();if(id!=='minArea')$('scaleConfirmed').checked=false};
 $('resetCriteria').onclick=()=>{$('optionalProcessing').open=false;$('minContrast').value=2;$('minArea').value=100;$('pointDensity').value=48;$('normalizeEnabled').checked=true;$('backgroundStrength').value=2;$('blurMethod').value='gaussian';$('blurStrength').value=0;invalidatePreprocessing();if(setupProject)updateCalibration()};
 function preprocessingPayload(){return {analysis_bottom:Number($('analysisBottom').value),preprocessing_mode:'adjustable',normalize_enabled:$('normalizeEnabled').checked,background_strength:Number($('backgroundStrength').value),blur_method:$('blurMethod').value,blur_strength:Number($('blurStrength').value)}}
@@ -240,7 +241,7 @@ async function followJob(jobId){
 }
 function validateAnalysisInput(){
   if(!setupProject)throw new Error('Choose an image first.');
-  const fields={scaleUm:'Enter the scale length in µm.',scalePixels:'Measure or enter the scale length in pixels.',analysisBottom:'Check the bottom boundary.',minContrast:'Enter contrast from 0 to 255.',minArea:'Enter a minimum object area.'};
+  const fields={scaleUm:'Enter the scale length in µm.',scalePixels:'Measure or enter the scale length in pixels.',scaleFactor:'Enter a correction factor from 0.01 to 100.',analysisBottom:'Check the bottom boundary.',minContrast:'Enter contrast from 0 to 255.',minArea:'Enter a minimum object area.'};
   for(const [id,message] of Object.entries(fields)){
     const field=$(id);
     if(field.value===''||!field.checkValidity()){
@@ -257,7 +258,7 @@ $('runAnalysis').onclick=()=>{
   return workspaceWork('Preparing analysis…',async()=>{
   const operation=beginStopOperation('runAnalysis',$('runAnalysis').textContent,jobMessage);
   try{
-  const config={...preprocessingPayload(),scale_um:Number($('scaleUm').value),scale_pixels:Number($('scalePixels').value),min_contrast:Number($('minContrast').value),min_area_pixels:Number($('minArea').value),points_per_side:Number($('pointDensity').value),scale_confirmed:$('scaleConfirmed').checked};
+  const config={...preprocessingPayload(),scale_um:Number($('scaleUm').value),scale_pixels:Number($('scalePixels').value),min_contrast:Number($('minContrast').value),min_area_pixels:Number($('minArea').value),points_per_side:Number($('pointDensity').value),scale_confirmed:$('scaleConfirmed').checked,scale_factor:Number($('scaleFactor').value)};
   const job=await api('analyze',{project_id:setupProject.id,config});$('analysisProgress').value=0;await followJob(job.job_id);
   }finally{operation.finish()}
   });

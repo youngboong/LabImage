@@ -36,7 +36,8 @@ def chord(mask, c, n, step=.25):
     return float(t[hi]-t[lo]+1), (P[lo]-n*.5, P[hi]+n*.5)
 
 
-def feret_measure(mask):
+def feret_measure(mask, width='min'):
+    """`width`: 'min' = minimum Feret (default), 'perpendicular' = the Feret diameter perpendicular to the length."""
     cs, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     pts = (np.concatenate(cs).reshape(-1, 2).astype(float)[:, None, :]+CORNERS[None]).reshape(-1, 2)
     h = cv2.convexHull(pts.astype(np.float32)).reshape(-1, 2).astype(float)
@@ -48,18 +49,28 @@ def feret_measure(mask):
     normals = np.stack([-e[:, 1], e[:, 0]], 1)/np.maximum(el, 1e-9)[:, None]
     reach = np.abs(np.einsum('kj,ij->ik', h, normals)-np.einsum('ij,ij->i', h, normals)[:, None])   # [edge, hull point] distance from the edge's line
     reach[el < 1e-9] = np.inf
-    k = int(reach.max(1).argmin()); far = h[int(reach[k].argmax())]
-    n, t = normals[k], e[k]/el[k]
-    if (far-h[k])@n < 0: n = -n
-    caliper = float((far-h[k])@n)
-    s = float(np.clip(far@t, h[k]@t, h[k]@t+el[k]))   # the line runs from the edge to the opposite outline point
-    line = (t*s+n*(h[k]@n), t*s+n*(far@n))
+    if width == 'perpendicular':
+        n = np.array([-d[1], d[0]]); p = h@n; lo, hi = p.argmin(), p.argmax()
+        caliper = float(p[hi]-p[lo])
+        s = ((h[lo]+h[hi])/2)@d   # along the length: midway between the two extreme outline points
+        line, touch = (d*s+n*p[lo], d*s+n*p[hi]), (h[lo], h[hi])
+    else:
+        k = int(reach.max(1).argmin()); far = h[int(reach[k].argmax())]
+        n, t = normals[k], e[k]/el[k]
+        if (far-h[k])@n < 0: n = -n
+        caliper = float((far-h[k])@n)
+        # A hull edge can bridge a dent, where a line end would hang in the air. The edge-side end rests on the outline point of that
+        # tangent nearest to `far`; the line sits midway between the two, so both (equal) end lines reach the particle.
+        on_edge = pts[np.abs((pts-h[k])@n) < .75]
+        near = on_edge[np.abs(on_edge@t-far@t).argmin()]
+        s = float((far@t+near@t)/2)
+        line = (t*s+n*(h[k]@n), t*s+n*(far@n)); touch = (near, far)
     return dict(length_px=float(dd[i, j]), length_line=[a.tolist(), b.tolist()], width_px=caliper, width_line=[line[0].tolist(), line[1].tolist()],
-                width_touch=[line[0].tolist(), far.tolist()],   # where the two width tangents touch the outline
+                width_touch=[touch[0].tolist(), touch[1].tolist()],   # where the two width tangents touch the outline
                 width_caliper_px=caliper, width_chord_px=chord_px or caliper, solidity=float(mask.sum()/max(cv2.contourArea(h.astype(np.float32)), 1)))
 
 
-def particle_features(masks, gray, um_per_pixel=REF_UM_PER_PX, others=()):
+def particle_features(masks, gray, um_per_pixel=REF_UM_PER_PX, others=(), width='min'):
     """One dict per mask for the rules (`others`: masks of already measured particles that count as neighbours but get no row)."""
     H, W = gray.shape; um2 = um_per_pixel**2
     min_area, border = round(MIN_AREA_UM2/um2), max(1, round(BORDER_UM/um_per_pixel))
@@ -73,7 +84,7 @@ def particle_features(masks, gray, um_per_pixel=REF_UM_PER_PX, others=()):
         if m.sum() < .2*m.size and ndi.binary_fill_holes(m).sum() < 1.3*m.sum() and ring.any() and float(gray[ring].mean()-bg[ring].mean()) >= RIM_MIN: owner[m] = k
     rows = []
     for k, m in enumerate(masks, 1):
-        area = int(m.sum()); f = feret_measure(m)
+        area = int(m.sum()); f = feret_measure(m, width)
         if area < min_area: rows.append(dict(small=True, area=area, feret=f)); continue
         yy, xx = np.nonzero(m)
         edge = m & ~cv2.erode(m.astype(np.uint8), k3).astype(bool)
@@ -94,10 +105,10 @@ def exclusion_reason(f):
     if f['aspect'] > STAND_ASPECT or f['interior'] > STAND_BRIGHT: return 'standing'
 
 
-def detect_particles(gray, proposals, um_per_pixel=REF_UM_PER_PX):
+def detect_particles(gray, proposals, um_per_pixel=REF_UM_PER_PX, width='min'):
     """(kept, counts): kept = feature dicts (with `mask`) of the proposals that pass every rule; counts per exclusion reason."""
     counts, kept = dict.fromkeys(REASONS, 0), []
-    for m, f in zip(proposals, particle_features(proposals, gray, um_per_pixel)):
+    for m, f in zip(proposals, particle_features(proposals, gray, um_per_pixel, width=width)):
         reason = exclusion_reason(f)
         if reason: counts[reason] += 1
         else: kept.append(dict(f, mask=m))

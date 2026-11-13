@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-VERSION = '0.1.3'
+VERSION = '0.1.4'
 BASE = '0.1.3'   # last version whose _internal (libraries, models) changed: raise it together with VERSION when a full install is needed
 REPO = 'youngboong/LabImage'
 MAX_PATCH = 300_000_000

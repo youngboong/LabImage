@@ -204,12 +204,15 @@ def test_save_labels_particle_only(lab, tmp_path):
     editor.detect_particles(state, rev(state))
     out = tmp_path/'out'; out.mkdir()
     r = editor.save_labels(state, dict(directory=str(out)))
-    names = ('img(2).png', 'img(3).png', 'img(2).csv', 'img(3).csv')
+    names = ('img(1).png', 'img(2).png', 'img(3).png', 'img(1).csv', 'img(2).csv', 'img(3).csv')
     assert sorted(Path(p).name for p in r['saved']) == sorted(names) and all((out/n).is_file() for n in names)
     for name in ('(2)', '(3)'):
         table = out/f'img{name}.csv'
         rows = list(csv.reader(open(table, encoding='utf-8-sig')))
         assert rows[0][0] == 'label' and [x[0] for x in rows[1:]] == ['1', '2']
+    low, old = ([float(x[1]) for x in list(csv.reader(open(out/f'img({n}).csv', encoding='utf-8-sig')))[1:]] for n in (1, 3))
+    assert len(low) == 2 and all(a <= b+.01 for a, b in zip(low, old))   # (1) minimum Feret is never wider than (3) perpendicular
+    assert editor.measurements(state)['particle_width_mode'] == 'min' and state['revision'] == 1   # saving both does not change the analysis
 
 
 def test_overlay_labels_are_value_only_and_clear(lab):
@@ -321,7 +324,7 @@ def test_batch_lists_only_originals_and_refuses_bad_folders(tmp_path, monkeypatc
     from lab_editor import LabEditor
     editor = LabEditor(output_root=tmp_path/'edits', project_root=tmp_path/'projects', device='cpu')
     folder = tmp_path/'images'; folder.mkdir()
-    for name in ('a.tif', 'a(2).tif', 'a(3).tif', 'b.png', 'notes.txt'): (folder/name).write_bytes(b'x')
+    for name in ('a.tif', 'a(1).tif', 'a(2).tif', 'a(3).tif', 'b.png', 'b(2).png', 'b(3).png', 'c.png', 'notes.txt'): (folder/name).write_bytes(b'x')
     seen = []
     monkeypatch.setattr(editor, 'batch_one', lambda path, overwrite: seen.append(path.name) or dict(status='saved', particles=1, excluded=0, unit='µm'))
     editor.batch_start(dict(directory=str(folder)))
@@ -329,7 +332,61 @@ def test_batch_lists_only_originals_and_refuses_bad_folders(tmp_path, monkeypatc
         if not editor.batch_status()['running']: break
         import time; time.sleep(.02)
     status = editor.batch_status()
-    assert seen == ['b.png'] and status['total'] == 2 and not status['running']   # a.tif already has (2)/(3): skipped, never replaced
-    assert [(r['name'], r['status']) for r in status['results']] == [('a.tif', 'skipped'), ('b.png', 'saved')]
+    assert seen == ['b.png', 'c.png'] and status['total'] == 3 and not status['running']   # a has (1), (2), (3): skipped. b has no (1): made again. c: new
+    assert [(r['name'], r['status']) for r in status['results']] == [('a.tif', 'skipped'), ('b.png', 'saved'), ('c.png', 'saved')]
     for bad in (dict(directory=str(tmp_path/'missing')), dict(directory='relative'), {}):
         with pytest.raises(ValueError): editor.batch_start(bad)
+
+
+def test_width_mode_switches_between_minimum_and_perpendicular():
+    c, th = np.array([150., 150.]), np.radians(30)
+    R = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
+    m = polygon((300, 300), c+np.array([[-50, -20], [50, -20], [50, 20], [-50, 20]])@R.T)
+    low, old = feret_measure(m), feret_measure(m, 'perpendicular')
+    assert low['width_px'] == pytest.approx(41, abs=1.5) and old['width_px'] == pytest.approx(74.3, abs=1.5)   # short side / extent perpendicular to the diagonal
+    assert low['length_line'] == old['length_line'] and low['width_chord_px'] == old['width_chord_px']   # only the width line differs
+    a, b = np.array(old['length_line']), np.array(old['width_line'])
+    assert abs((a[1]-a[0])@(b[1]-b[0]))/(old['length_px']*old['width_px']) < 1e-6
+
+
+def test_width_mode_changes_automatic_lines_only_and_is_one_undo(lab):
+    editor, state = lab
+    editor.detect_particles(state, rev(state))
+    editor.particle_line(state, dict(rev(state), axis='width', points=[[100, 50], [100, 110]]))   # particle 1: hand-drawn width
+    assert editor.measurements(state)['particle_width_mode'] == 'min'
+    before = {i: state['annotations'][str(i)]['particle']['width_px'] for i in (1, 2)}
+    r = editor.particle_width_mode(state, dict(rev(state), mode='perpendicular'))
+    assert r['object_ids'] == [2] and editor.measurements(state)['particle_width_mode'] == 'perpendicular'
+    a = state['annotations']
+    assert a['1']['measurement_methods']['width'] == 'manual_line' and a['1']['particle']['width_px'] == before[1]
+    assert a['2']['measurement_methods']['width'] == 'auto_feret_perpendicular' and a['2']['particle']['width_px'] >= before[2]-1e-6
+    assert a['2']['manual_measurements']['width'] == a['2']['particle']['width_line']
+    editor.mutate(state, rev(state), 'undo')
+    assert state['annotations']['2']['measurement_methods']['width'] == 'auto_feret_min' and state['annotations']['2']['particle']['width_px'] == before[2]
+    with pytest.raises(ValueError, match='Choose Minimum or Perpendicular'): editor.particle_width_mode(state, dict(rev(state), mode='x'))
+
+
+def test_minimum_width_line_touches_the_particle_across_a_dent():
+    from lab_geometry import particle_segments
+    m = np.zeros((200, 200), bool); m[50:150, 40:60] = True; m[50:150, 100:120] = True; m[130:150, 40:120] = True; m[50:90, 60:100] = False   # U: the hull bridges the notch
+    for mask in (m, m.T, polygon((300, 300), [[40, 100], [150, 60], [260, 110], [120, 150]])):
+        f = feret_measure(mask); yy, xx = np.nonzero(mask); cells = np.stack([xx, yy], 1).astype(float)
+        for p, q in particle_segments(f['width_line'], touch=f['width_touch'])[1:]:   # each end line holds a point of the particle
+            d = (q-p)/np.linalg.norm(q-p); rel = cells-p; along = rel@d
+            off = np.abs(rel@np.array([-d[1], d[0]]))
+            assert ((off < 1.5) & (along > -1.5) & (along < np.linalg.norm(q-p)+1.5)).any()
+
+
+def test_correction_factor_scales_lengths_not_detection(lab):
+    editor, state = lab
+    plain = editor.detect_particles(dict(state, masks={}, annotations={}, history=[], next_id=1, revision=0, report=dict(state['report'])), {'revision': 0})['excluded']
+    state['report']['scale'] = dict(um_per_pixel=UMP*1.1, image_um_per_pixel=UMP, scale_factor=1.1)
+    r = editor.detect_particles(state, rev(state))
+    assert r['excluded'] == plain   # detection sizes use the image scale
+    row = editor.measurements(state)['candidates'][0]
+    p = state['annotations'][str(row['candidate_id'])]['particle']
+    assert row['length_um'] == pytest.approx(p['length_px']*UMP*1.1) and row['width_um'] == pytest.approx(p['width_px']*UMP*1.1)
+    assert editor.workflow.last_scale_factor() == 1.   # nothing saved yet
+    editor.workflow.root.mkdir(parents=True, exist_ok=True)
+    (editor.workflow.root/'scale_factor.json').write_text('{"scale_factor": 1.05}', encoding='utf-8')
+    assert editor.workflow.last_scale_factor() == 1.05
